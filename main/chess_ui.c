@@ -16,6 +16,7 @@ static void render_lobby(void);
 static void render_game(void);
 static void render_invite_dialog(void);
 static void render_message(void);
+static void chess_ui_render_internal(void);
 
 static const char* TAG = "chess_ui";
 
@@ -165,8 +166,6 @@ void chess_ui_switch_screen(ChessScreen screen)
             g_ui->has_selection = false;
             break;
     }
-
-    chess_ui_render();
 }
 
 void chess_ui_update_game(const ChessGame* game)
@@ -174,8 +173,8 @@ void chess_ui_update_game(const ChessGame* game)
     if (game && g_game) {
         ui_lock_acquire();
         memcpy(g_game, game, sizeof(ChessGame));
+        chess_ui_render_internal();
         ui_lock_release();
-        chess_ui_render();
     }
 }
 
@@ -197,9 +196,8 @@ void chess_ui_show_invite_dialog(const char* opponent_id)
     g_ui->invite_opponent[sizeof(g_ui->invite_opponent) - 1] = '\0';
     g_ui->show_invite = true;
     g_ui->menu_index = 0;
+    chess_ui_render_internal();
     ui_lock_release();
-
-    chess_ui_render();
 }
 
 void chess_ui_hide_invite_dialog(void)
@@ -207,8 +205,8 @@ void chess_ui_hide_invite_dialog(void)
     if (g_ui) {
         ui_lock_acquire();
         g_ui->show_invite = false;
+        chess_ui_render_internal();
         ui_lock_release();
-        chess_ui_render();
     }
 }
 
@@ -221,9 +219,8 @@ void chess_ui_show_message(const char* message, int duration_ms)
     g_ui->message_text[sizeof(g_ui->message_text) - 1] = '\0';
     g_ui->show_message = true;
     g_ui->message_timer = duration_ms / 100;  // Convert to 100ms ticks
+    chess_ui_render_internal();
     ui_lock_release();
-
-    chess_ui_render();
 }
 
 void chess_ui_handle_key(KeyCode key)
@@ -249,8 +246,8 @@ void chess_ui_handle_key(KeyCode key)
         } else if (key == KEY_B) {
             g_ui->show_invite = false;
         }
+        chess_ui_render_internal();
         ui_lock_release();
-        chess_ui_render();
         return;
     }
 
@@ -396,8 +393,8 @@ void chess_ui_handle_key(KeyCode key)
             break;
     }
 
+    chess_ui_render_internal();
     ui_lock_release();
-    chess_ui_render();
 }
 
 void chess_ui_update(void)
@@ -410,7 +407,8 @@ void chess_ui_update(void)
             g_ui->message_timer--;
         } else {
             g_ui->show_message = false;
-            chess_ui_render();
+            // Don't render here - let the caller handle rendering if needed
+            // to avoid lock contention
         }
     }
 
@@ -418,11 +416,10 @@ void chess_ui_update(void)
     g_ui->cursor_blink++;
 }
 
-void chess_ui_render(void)
+// Internal render function - assumes lock is already held
+static void chess_ui_render_internal(void)
 {
     if (!g_ui || !g_ui->sprite_created) return;
-
-    ui_lock_acquire();
 
     // Clear sprite
     tft_sprite_fill_screen(&g_ui->sprite, COLOR_BACKGROUND);
@@ -455,7 +452,14 @@ void chess_ui_render(void)
 
     // Push sprite to display
     tft_sprite_push(&g_ui->sprite, 0, 0);
+}
 
+void chess_ui_render(void)
+{
+    if (!g_ui || !g_ui->sprite_created) return;
+
+    ui_lock_acquire();
+    chess_ui_render_internal();
     ui_lock_release();
 }
 
