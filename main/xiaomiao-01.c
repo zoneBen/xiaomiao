@@ -12,6 +12,7 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/ledc.h"
+#include "esp_adc/adc_oneshot.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "lvgl.h"
@@ -61,6 +62,12 @@ static const char *TAG = "xiaomiao";
 #define KEY_A_GPIO 34
 #define KEY_B_GPIO 12
 
+// ADC Sensor Pins
+#define LIGHT_SENSOR_ADC_CHANNEL ADC_CHANNEL_0  // GPIO36
+#define TEMP_SENSOR_ADC_CHANNEL ADC_CHANNEL_3   // GPIO39
+#define ADC_UNIT ADC_UNIT_1
+#define ADC_ATTENUATION ADC_ATTEN_DB_11
+
 // LVGL mutex for thread safety
 static _lock_t lvgl_api_lock;
 
@@ -70,7 +77,14 @@ static esp_lcd_panel_handle_t panel_handle = NULL;
 
 // UI elements
 static lv_obj_t *status_label = NULL;
+static lv_obj_t *light_label = NULL;
+static lv_obj_t *temp_label = NULL;
 static char key_text[32] = "Press any key!";
+static char light_text[32] = "Light: ---";
+static char temp_text[32] = "Temp: --.- C";
+
+// ADC handles
+static adc_oneshot_unit_handle_t adc_handle = NULL;
 
 // Button states
 static bool key_up_pressed(void) { return gpio_get_level(KEY_UP_GPIO) == 0; }
@@ -145,6 +159,48 @@ static void keys_init(void)
     gpio_config(&io_conf_no_pull);
 }
 
+static void adc_sensors_init(void)
+{
+    // Configure ADC one-shot mode
+    adc_oneshot_unit_init_cfg_t unit_cfg = {
+        .unit_id = ADC_UNIT,
+        .ulp_mode = ADC_ULP_MODE_DISABLE,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &adc_handle));
+
+    // Configure channels
+    adc_oneshot_chan_cfg_t chan_cfg = {
+        .atten = ADC_ATTENUATION,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, LIGHT_SENSOR_ADC_CHANNEL, &chan_cfg));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, TEMP_SENSOR_ADC_CHANNEL, &chan_cfg));
+}
+
+static int read_light_sensor(void)
+{
+    int value = 0;
+    esp_err_t ret = adc_oneshot_read(adc_handle, LIGHT_SENSOR_ADC_CHANNEL, &value);
+    return (ret == ESP_OK) ? value : 0;
+}
+
+static int read_temp_sensor(void)
+{
+    int value = 0;
+    esp_err_t ret = adc_oneshot_read(adc_handle, TEMP_SENSOR_ADC_CHANNEL, &value);
+    return (ret == ESP_OK) ? value : 0;
+}
+
+static float adc_to_temperature(int adc_value)
+{
+    // Simple NTC thermistor approximation
+    // Assuming 10k NTC, 10k pull-up, 25C nominal
+    // This is a basic linear approximation for demonstration
+    float voltage = (float)adc_value / 4095.0f * 3.3f;
+    float temp = 25.0f + (voltage - 1.65f) * 50.0f;
+    return temp;
+}
+
 static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
 {
     lv_display_t *disp = (lv_display_t *)user_ctx;
@@ -193,14 +249,28 @@ static void create_ui(lv_display_t *disp)
     // Title label
     lv_obj_t *title_label = lv_label_create(scr);
     lv_label_set_text(title_label, "XiaoMiao");
-    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 5);
     lv_obj_set_style_text_color(title_label, lv_color_hex(0x00FF00), 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
+
+    // Light sensor label
+    light_label = lv_label_create(scr);
+    lv_label_set_text(light_label, light_text);
+    lv_obj_align(light_label, LV_ALIGN_TOP_MID, 0, 30);
+    lv_obj_set_style_text_color(light_label, lv_color_hex(0xFFFF00), 0);
+    lv_obj_set_style_text_font(light_label, &lv_font_montserrat_14, 0);
+
+    // Temperature sensor label
+    temp_label = lv_label_create(scr);
+    lv_label_set_text(temp_label, temp_text);
+    lv_obj_align(temp_label, LV_ALIGN_TOP_MID, 0, 55);
+    lv_obj_set_style_text_color(temp_label, lv_color_hex(0xFF8800), 0);
+    lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_14, 0);
 
     // Status label - save reference for updates
     status_label = lv_label_create(scr);
     lv_label_set_text(status_label, key_text);
-    lv_obj_align(status_label, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_align(status_label, LV_ALIGN_CENTER, 0, 15);
     lv_obj_set_style_text_color(status_label, lv_color_hex(0xFFFFFF), 0);
 
     // Key labels
@@ -219,6 +289,9 @@ void app_main(void)
 
     // Initialize keys
     keys_init();
+
+    // Initialize ADC sensors
+    adc_sensors_init();
 
     ESP_LOGI(TAG, "Initialize SPI bus");
     spi_bus_config_t buscfg = {
@@ -306,8 +379,31 @@ void app_main(void)
     ESP_LOGI(TAG, "XiaoMiao started!");
 
     bool last_state = false;
+    int last_sensor_update = 0;
 
     while (1) {
+        // Read sensors every 500ms
+        int now = xTaskGetTickCount();
+        if (now - last_sensor_update > pdMS_TO_TICKS(500)) {
+            int light_val = read_light_sensor();
+            int temp_adc = read_temp_sensor();
+            float temp_c = adc_to_temperature(temp_adc);
+
+            // Update sensor display
+            if (light_label && temp_label) {
+                _lock_acquire(&lvgl_api_lock);
+                snprintf(light_text, sizeof(light_text), "Light: %4d", light_val);
+                snprintf(temp_text, sizeof(temp_text), "Temp: %4.1f C", temp_c);
+                lv_label_set_text(light_label, light_text);
+                lv_label_set_text(temp_label, temp_text);
+                _lock_release(&lvgl_api_lock);
+            }
+
+            ESP_LOGI(TAG, "Light: %d, Temp ADC: %d, Temp: %.1f C", light_val, temp_adc, temp_c);
+            last_sensor_update = now;
+        }
+
+        // Check keys
         bool any_key = key_up_pressed() || key_down_pressed() ||
                        key_left_pressed() || key_right_pressed() ||
                        key_a_pressed() || key_b_pressed();

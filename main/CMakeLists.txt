@@ -1,7 +1,7 @@
 idf_component_register(SRCS "xiaomiao-01.c"
                          INCLUDE_DIRS "."
-                         REQUIRES esp_lcd driver esp_timer)
-						 
+                         REQUIRES esp_lcd driver esp_timer esp_adc)
+
  if(LVGL_VERSION)
       message(STATUS "Found LVGL version ${LVGL_VERSION}")
   endif()
