@@ -118,6 +118,103 @@ static void buzzer_init(void) {
     ledc_channel_config(&ledc_channel);
 }
 
+static void key_init(void) {
+    // Configure GPIOs with pull-up (2, 12, 13, 27)
+    gpio_config_t io_conf = {0};
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pin_bit_mask = (1ULL << KEY_UP_GPIO) |
+                           (1ULL << KEY_DOWN_GPIO) |
+                           (1ULL << KEY_LEFT_GPIO) |
+                           (1ULL << KEY_B_GPIO);
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    gpio_config(&io_conf);
+
+    // Configure input-only GPIOs without pull-up (34, 35)
+    gpio_config_t io_conf_input_only = {0};
+    io_conf_input_only.intr_type = GPIO_INTR_DISABLE;
+    io_conf_input_only.mode = GPIO_MODE_INPUT;
+    io_conf_input_only.pin_bit_mask = (1ULL << KEY_RIGHT_GPIO) |
+                                      (1ULL << KEY_A_GPIO);
+    io_conf_input_only.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf_input_only.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    gpio_config(&io_conf_input_only);
+}
+
+static bool key_get_state(int gpio_num) {
+    return gpio_get_level(gpio_num) == 0;
+}
+
+typedef struct {
+    int gpio;
+    lv_key_t lv_key;
+    bool last_state;
+    bool pressed;
+    bool debounced;
+    TickType_t debounce_tick;
+} KeyState;
+
+static KeyState keys[] = {
+    {KEY_UP_GPIO, LV_KEY_UP, false, false, false, 0},
+    {KEY_DOWN_GPIO, LV_KEY_DOWN, false, false, false, 0},
+    {KEY_LEFT_GPIO, LV_KEY_LEFT, false, false, false, 0},
+    {KEY_RIGHT_GPIO, LV_KEY_RIGHT, false, false, false, 0},
+    {KEY_A_GPIO, LV_KEY_ENTER, false, false, false, 0},
+    {KEY_B_GPIO, LV_KEY_ESC, false, false, false, 0},
+};
+
+#define KEY_DEBOUNCE_MS 20
+
+static void keypad_read(lv_indev_t* indev, lv_indev_data_t* data) {
+    static uint32_t last_key = 0;
+    bool has_pressed = false;
+
+    for (int i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        if (keys[i].pressed) {
+            data->key = keys[i].lv_key;
+            data->state = LV_INDEV_STATE_PRESSED;
+            last_key = keys[i].lv_key;
+            has_pressed = true;
+            break;
+        }
+    }
+
+    if (!has_pressed) {
+        data->key = last_key;
+        data->state = LV_INDEV_STATE_RELEASED;
+    }
+}
+
+static void key_scan_task(void* arg) {
+    TickType_t last_wakeup = xTaskGetTickCount();
+    const TickType_t scan_delay = pdMS_TO_TICKS(5);
+    const TickType_t min_delay = (scan_delay > 0) ? scan_delay : 1;
+
+    while (1) {
+        for (int i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+            bool current = key_get_state(keys[i].gpio);
+            TickType_t now = xTaskGetTickCount();
+
+            if (current != keys[i].last_state) {
+                keys[i].debounce_tick = now;
+                keys[i].debounced = false;
+            }
+
+            if (!keys[i].debounced &&
+                (now - keys[i].debounce_tick) >= pdMS_TO_TICKS(KEY_DEBOUNCE_MS)) {
+                keys[i].debounced = true;
+                if (current != keys[i].pressed) {
+                    keys[i].pressed = current;
+                }
+            }
+
+            keys[i].last_state = current;
+        }
+
+        vTaskDelayUntil(&last_wakeup, min_delay);
+    }
+}
+
 static void network_state_change(NetworkState state) {
     const char* status_str = "Unknown";
     switch (state) {
@@ -152,6 +249,7 @@ void app_main(void) {
     ESP_LOGI(TAG, "XiaoMiao Chess starting...");
 
     buzzer_init();
+    key_init();
 
     ESP_LOGI(TAG, "Initialize SPI bus");
     spi_bus_config_t buscfg = {
@@ -221,7 +319,13 @@ void app_main(void) {
     };
     ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(panel_io_handle, &cbs, display));
 
+    lv_indev_t* indev_keypad = lv_indev_create();
+    lv_indev_set_type(indev_keypad, LV_INDEV_TYPE_KEYPAD);
+    lv_indev_set_read_cb(indev_keypad, keypad_read);
+    lv_indev_set_group(indev_keypad, chess_ui_get_group());
+
     xTaskCreate(lvgl_port_task, "LVGL", LVGL_TASK_STACK_SIZE, NULL, LVGL_TASK_PRIORITY, NULL);
+    xTaskCreate(key_scan_task, "KeyScan", 2048, NULL, 5, NULL);
 
     ESP_LOGI(TAG, "Initialize network");
     network_init();

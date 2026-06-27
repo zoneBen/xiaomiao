@@ -19,5 +19,6 @@ void chess_ui_set_network_status(const char* status);
 void chess_ui_show_invite_dialog(const char* opponent_id);
 void chess_ui_hide_invite_dialog(void);
 void chess_ui_show_message(const char* message, int duration_ms);
+lv_group_t* chess_ui_get_group(void);
 
 #endif

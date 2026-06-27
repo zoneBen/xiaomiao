@@ -16,7 +16,7 @@
 
 #define LV_USE_ANIMATION 1
 #define LV_USE_SHADOW 1
-#define LV_USE_GROUP 0
+#define LV_USE_GROUP 1
 #define LV_USE_USER_DATA 1
 #define LV_USE_FLEX 1
 #define LV_USE_GRID 1

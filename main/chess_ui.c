@@ -52,6 +52,7 @@ typedef struct {
 
 static ChessUIContext* g_ui = NULL;
 static ChessGame* g_game = NULL;
+static lv_group_t* g_group = NULL;
 
 static const char* piece_symbols[2][6] = {
     {"♙", "♘", "♗", "♖", "♕", "♔"},
@@ -248,6 +249,8 @@ static void create_main_menu_screen(void) {
     lv_obj_t* btn_local = lv_btn_create(g_ui->screen_main);
     lv_obj_set_size(btn_local, 140, 50);
     lv_obj_align(btn_local, LV_ALIGN_CENTER, 0, -30);
+    lv_obj_add_flag(btn_local, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, btn_local);
     lv_obj_t* label_local = lv_label_create(btn_local);
     lv_label_set_text(label_local, "Local Game");
     lv_obj_center(label_local);
@@ -255,6 +258,8 @@ static void create_main_menu_screen(void) {
     lv_obj_t* btn_network = lv_btn_create(g_ui->screen_main);
     lv_obj_set_size(btn_network, 140, 50);
     lv_obj_align(btn_network, LV_ALIGN_CENTER, 0, 40);
+    lv_obj_add_flag(btn_network, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, btn_network);
     lv_obj_t* label_network = lv_label_create(btn_network);
     lv_label_set_text(label_network, "Network Game");
     lv_obj_center(label_network);
@@ -282,6 +287,8 @@ static void create_network_setup_screen(void) {
     lv_obj_align(g_ui->ssid_input, LV_ALIGN_TOP_LEFT, 10, 60);
     lv_textarea_set_placeholder_text(g_ui->ssid_input, "SSID");
     lv_textarea_set_one_line(g_ui->ssid_input, true);
+    lv_obj_add_flag(g_ui->ssid_input, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->ssid_input);
 
     lv_obj_t* pass_label = lv_label_create(g_ui->screen_network);
     lv_label_set_text(pass_label, "Password:");
@@ -294,6 +301,8 @@ static void create_network_setup_screen(void) {
     lv_textarea_set_placeholder_text(g_ui->password_input, "Password");
     lv_textarea_set_password_mode(g_ui->password_input, true);
     lv_textarea_set_one_line(g_ui->password_input, true);
+    lv_obj_add_flag(g_ui->password_input, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->password_input);
 
     lv_obj_t* mqtt_label = lv_label_create(g_ui->screen_network);
     lv_label_set_text(mqtt_label, "MQTT Broker:");
@@ -305,6 +314,8 @@ static void create_network_setup_screen(void) {
     lv_obj_align(g_ui->mqtt_uri_input, LV_ALIGN_TOP_LEFT, 10, 180);
     lv_textarea_set_placeholder_text(g_ui->mqtt_uri_input, "mqtt://broker.hivemq.com");
     lv_textarea_set_one_line(g_ui->mqtt_uri_input, true);
+    lv_obj_add_flag(g_ui->mqtt_uri_input, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->mqtt_uri_input);
 
     lv_textarea_set_text(g_ui->mqtt_uri_input, "mqtt://broker.hivemq.com");
 
@@ -321,6 +332,8 @@ static void create_network_setup_screen(void) {
     g_ui->connect_btn = lv_btn_create(g_ui->screen_network);
     lv_obj_set_size(g_ui->connect_btn, 60, 35);
     lv_obj_align(g_ui->connect_btn, LV_ALIGN_BOTTOM_LEFT, 10, -10);
+    lv_obj_add_flag(g_ui->connect_btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->connect_btn);
     lv_obj_t* label_connect = lv_label_create(g_ui->connect_btn);
     lv_label_set_text(label_connect, "Connect");
     lv_obj_center(label_connect);
@@ -328,6 +341,8 @@ static void create_network_setup_screen(void) {
     g_ui->disconnect_btn = lv_btn_create(g_ui->screen_network);
     lv_obj_set_size(g_ui->disconnect_btn, 60, 35);
     lv_obj_align(g_ui->disconnect_btn, LV_ALIGN_BOTTOM_LEFT, 80, -10);
+    lv_obj_add_flag(g_ui->disconnect_btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->disconnect_btn);
     lv_obj_t* label_disconnect = lv_label_create(g_ui->disconnect_btn);
     lv_label_set_text(label_disconnect, "Disconn");
     lv_obj_center(label_disconnect);
@@ -335,6 +350,8 @@ static void create_network_setup_screen(void) {
     lv_obj_t* btn_back = lv_btn_create(g_ui->screen_network);
     lv_obj_set_size(btn_back, 60, 35);
     lv_obj_align(btn_back, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+    lv_obj_add_flag(btn_back, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, btn_back);
     lv_obj_t* label_back = lv_label_create(btn_back);
     lv_label_set_text(label_back, "Back");
     lv_obj_center(label_back);
@@ -361,6 +378,8 @@ static void create_lobby_screen(void) {
     g_ui->search_btn = lv_btn_create(g_ui->screen_lobby);
     lv_obj_set_size(g_ui->search_btn, 100, 35);
     lv_obj_align(g_ui->search_btn, LV_ALIGN_TOP_LEFT, 10, 60);
+    lv_obj_add_flag(g_ui->search_btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->search_btn);
     lv_obj_t* label_search = lv_label_create(g_ui->search_btn);
     lv_label_set_text(label_search, "Search");
     lv_obj_center(label_search);
@@ -368,6 +387,8 @@ static void create_lobby_screen(void) {
     g_ui->stop_search_btn = lv_btn_create(g_ui->screen_lobby);
     lv_obj_set_size(g_ui->stop_search_btn, 100, 35);
     lv_obj_align(g_ui->stop_search_btn, LV_ALIGN_TOP_LEFT, 120, 60);
+    lv_obj_add_flag(g_ui->stop_search_btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->stop_search_btn);
     lv_obj_t* label_stop = lv_label_create(g_ui->stop_search_btn);
     lv_label_set_text(label_stop, "Stop");
     lv_obj_center(label_stop);
@@ -376,10 +397,14 @@ static void create_lobby_screen(void) {
     g_ui->opponent_list = lv_list_create(g_ui->screen_lobby);
     lv_obj_set_size(g_ui->opponent_list, 140, 100);
     lv_obj_align(g_ui->opponent_list, LV_ALIGN_TOP_LEFT, 10, 100);
+    lv_obj_add_flag(g_ui->opponent_list, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->opponent_list);
 
     lv_obj_t* btn_back = lv_btn_create(g_ui->screen_lobby);
     lv_obj_set_size(btn_back, 60, 35);
     lv_obj_align(btn_back, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+    lv_obj_add_flag(btn_back, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, btn_back);
     lv_obj_t* label_back = lv_label_create(btn_back);
     lv_label_set_text(label_back, "Back");
     lv_obj_center(label_back);
@@ -415,6 +440,8 @@ static void create_game_screen(void) {
             lv_obj_set_grid_cell(btn, LV_GRID_ALIGN_STRETCH, y, 1, LV_GRID_ALIGN_STRETCH, x, 1);
             lv_obj_set_style_radius(btn, 0, 0);
             lv_obj_set_style_border_width(btn, 0, 0);
+            lv_obj_add_flag(btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+            lv_group_add_obj(g_group, btn);
 
             if ((x + y) % 2 == 0) {
                 lv_obj_set_style_bg_color(btn, lv_color_hex(0xF0D9B5), 0);
@@ -438,6 +465,8 @@ static void create_game_screen(void) {
     g_ui->back_btn = lv_btn_create(g_ui->screen_game);
     lv_obj_set_size(g_ui->back_btn, 50, 30);
     lv_obj_align(g_ui->back_btn, LV_ALIGN_BOTTOM_LEFT, 5, -5);
+    lv_obj_add_flag(g_ui->back_btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->back_btn);
     lv_obj_t* label_back = lv_label_create(g_ui->back_btn);
     lv_label_set_text(label_back, "Back");
     lv_obj_center(label_back);
@@ -445,6 +474,8 @@ static void create_game_screen(void) {
     g_ui->resign_btn = lv_btn_create(g_ui->screen_game);
     lv_obj_set_size(g_ui->resign_btn, 50, 30);
     lv_obj_align(g_ui->resign_btn, LV_ALIGN_BOTTOM_LEFT, 60, -5);
+    lv_obj_add_flag(g_ui->resign_btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->resign_btn);
     lv_obj_t* label_resign = lv_label_create(g_ui->resign_btn);
     lv_label_set_text(label_resign, "Resign");
     lv_obj_center(label_resign);
@@ -452,6 +483,8 @@ static void create_game_screen(void) {
     g_ui->draw_btn = lv_btn_create(g_ui->screen_game);
     lv_obj_set_size(g_ui->draw_btn, 50, 30);
     lv_obj_align(g_ui->draw_btn, LV_ALIGN_BOTTOM_LEFT, 115, -5);
+    lv_obj_add_flag(g_ui->draw_btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->draw_btn);
     lv_obj_t* label_draw = lv_label_create(g_ui->draw_btn);
     lv_label_set_text(label_draw, "Draw");
     lv_obj_center(label_draw);
@@ -468,6 +501,8 @@ void chess_ui_init(void) {
     if (g_ui) {
         return;
     }
+
+    g_group = lv_group_create();
 
     g_ui = (ChessUIContext*)calloc(1, sizeof(ChessUIContext));
     if (!g_ui) {
@@ -497,6 +532,10 @@ void chess_ui_init(void) {
     lv_scr_load(g_ui->screen_main);
 }
 
+lv_group_t* chess_ui_get_group(void) {
+    return g_group;
+}
+
 void chess_ui_deinit(void) {
     if (g_ui) {
         if (g_game) {
@@ -517,12 +556,16 @@ void chess_ui_switch_screen(ChessScreen screen) {
     switch (screen) {
         case SCREEN_MAIN_MENU:
             lv_scr_load(g_ui->screen_main);
+            lv_obj_t* btn_local = lv_obj_get_child(g_ui->screen_main, 1);
+            if (btn_local) lv_group_focus_obj(btn_local);
             break;
         case SCREEN_NETWORK_SETUP:
             lv_scr_load(g_ui->screen_network);
+            if (g_ui->ssid_input) lv_group_focus_obj(g_ui->ssid_input);
             break;
         case SCREEN_LOBBY:
             lv_scr_load(g_ui->screen_lobby);
+            if (g_ui->search_btn) lv_group_focus_obj(g_ui->search_btn);
             break;
         case SCREEN_GAME:
             lv_scr_load(g_ui->screen_game);
@@ -531,6 +574,7 @@ void chess_ui_switch_screen(ChessScreen screen) {
                 lv_obj_clear_flag(g_ui->resign_btn, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_clear_flag(g_ui->draw_btn, LV_OBJ_FLAG_HIDDEN);
             }
+            if (g_ui->board_squares[0][0]) lv_group_focus_obj(g_ui->board_squares[0][0]);
             break;
     }
 }
@@ -577,6 +621,8 @@ void chess_ui_show_invite_dialog(const char* opponent_id) {
     g_ui->accept_btn = lv_btn_create(g_ui->invite_dialog);
     lv_obj_set_size(g_ui->accept_btn, 50, 30);
     lv_obj_align(g_ui->accept_btn, LV_ALIGN_BOTTOM_LEFT, 10, -10);
+    lv_obj_add_flag(g_ui->accept_btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->accept_btn);
     lv_obj_t* label_accept = lv_label_create(g_ui->accept_btn);
     lv_label_set_text(label_accept, "Accept");
     lv_obj_center(label_accept);
@@ -584,12 +630,16 @@ void chess_ui_show_invite_dialog(const char* opponent_id) {
     g_ui->reject_btn = lv_btn_create(g_ui->invite_dialog);
     lv_obj_set_size(g_ui->reject_btn, 50, 30);
     lv_obj_align(g_ui->reject_btn, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+    lv_obj_add_flag(g_ui->reject_btn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_group_add_obj(g_group, g_ui->reject_btn);
     lv_obj_t* label_reject = lv_label_create(g_ui->reject_btn);
     lv_label_set_text(label_reject, "Reject");
     lv_obj_center(label_reject);
 
     lv_obj_add_event_cb(g_ui->accept_btn, btn_accept_invite_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(g_ui->reject_btn, btn_reject_invite_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_group_focus_obj(g_ui->accept_btn);
 
     ui_lock_release();
 }
