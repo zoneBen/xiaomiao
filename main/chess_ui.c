@@ -4,6 +4,7 @@
 #include "ui_lock.h"
 #include "tft_display.h"
 #include "chess_pieces.h"
+#include "sound.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include <string.h>
@@ -53,6 +54,9 @@ typedef struct {
     char message_text[64];
     int message_timer;
 
+    // Sound settings
+    bool music_enabled;
+
     // Screen buffer
     TFT_Sprite sprite;
     bool sprite_created;
@@ -64,7 +68,8 @@ static ChessGame* g_game = NULL;
 // Menu items for main menu
 static const char* main_menu_items[] = {
     "Local Game",
-    "Network Game"
+    "Network Game",
+    "Music: Off"
 };
 
 // Menu items for lobby
@@ -99,7 +104,7 @@ void chess_ui_init(void)
     // Initialize UI state
     g_ui->current_screen = SCREEN_MAIN_MENU;
     g_ui->menu_index = 0;
-    g_ui->menu_count = 2;
+    g_ui->menu_count = 3;
     g_ui->cursor_x = 0;
     g_ui->cursor_y = 0;
     g_ui->selected_x = -1;
@@ -109,6 +114,7 @@ void chess_ui_init(void)
     g_ui->input_field = 0;
     g_ui->input_pos = 0;
     g_ui->searching = false;
+    g_ui->music_enabled = false;
 
     // Default WiFi/MQTT settings
     strcpy(g_ui->mqtt_uri, "mqtt://broker.hivemq.com");
@@ -149,7 +155,7 @@ void chess_ui_switch_screen(ChessScreen screen)
 
     switch (screen) {
         case SCREEN_MAIN_MENU:
-            g_ui->menu_count = 2;
+            g_ui->menu_count = 3;
             break;
         case SCREEN_NETWORK_SETUP:
             g_ui->menu_count = 6;
@@ -259,9 +265,20 @@ void chess_ui_handle_key(KeyCode key)
                 if (g_ui->menu_index < g_ui->menu_count - 1) g_ui->menu_index++;
             } else if (key == KEY_A) {
                 if (g_ui->menu_index == 0) {
+                    sound_play(SOUND_GAME_START);
                     chess_ui_switch_screen(SCREEN_GAME);
-                } else {
+                } else if (g_ui->menu_index == 1) {
+                    sound_play(SOUND_MENU_SELECT);
                     chess_ui_switch_screen(SCREEN_NETWORK_SETUP);
+                } else if (g_ui->menu_index == 2) {
+                    // Toggle music
+                    g_ui->music_enabled = !g_ui->music_enabled;
+                    if (g_ui->music_enabled) {
+                        sound_start_background_music();
+                        sound_play(SOUND_MENU_SELECT);
+                    } else {
+                        sound_stop_background_music();
+                    }
                 }
             }
             break;
@@ -346,13 +363,24 @@ void chess_ui_handle_key(KeyCode key)
                         g_ui->selected_y = -1;
                     } else if (chess_game_is_valid_move(g_game, g_ui->selected_x, g_ui->selected_y,
                                                         g_ui->cursor_x, g_ui->cursor_y)) {
+                        // Check if this is a capture
+                        ChessPiece target_piece = chess_game_get_piece(g_game, g_ui->cursor_x, g_ui->cursor_y);
+                        bool is_capture = (target_piece.type != PIECE_NONE);
+
                         // Make move
                         if (chess_game_make_move(g_game, g_ui->selected_x, g_ui->selected_y,
                                                 g_ui->cursor_x, g_ui->cursor_y, PIECE_QUEEN)) {
+                            if (is_capture) {
+                                sound_play(SOUND_CAPTURE);
+                            } else {
+                                sound_play(SOUND_MOVE);
+                            }
                             if (chess_network_get_state() == CHESS_NET_STATE_PLAYING) {
                                 chess_network_send_move(g_ui->selected_x, g_ui->selected_y,
                                                         g_ui->cursor_x, g_ui->cursor_y, PIECE_QUEEN);
                             }
+                        } else {
+                            sound_play(SOUND_MOVE);
                         }
                         g_ui->has_selection = false;
                         g_ui->selected_x = -1;
@@ -473,7 +501,7 @@ static void render_main_menu(void)
     }
 
     // Menu items
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         int y = 40 + i * 25;
         bool is_selected = (i == g_ui->menu_index);
 
@@ -483,6 +511,10 @@ static void render_main_menu(void)
 
         int text_x = 25;
         const char* text = main_menu_items[i];
+        if (i == 2) {
+            // Dynamic music option text
+            text = g_ui->music_enabled ? "Music: On " : "Music: Off";
+        }
         while (*text) {
             tft_sprite_draw_char(&g_ui->sprite, text_x, y + 6, *text, is_selected ? TFT_YELLOW : TFT_WHITE, 1);
             text_x += 6;

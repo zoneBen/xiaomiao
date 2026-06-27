@@ -4,7 +4,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
-#include "driver/ledc.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "chess.h"
@@ -13,15 +12,10 @@
 #include "network.h"
 #include "ui_lock.h"
 #include "tft_display.h"
+#include "sound.h"
 
 static const char* TAG = "xiaomiao";
 
-#define BUZZER_GPIO 14
-#define LEDC_TIMER LEDC_TIMER_0
-#define LEDC_MODE LEDC_LOW_SPEED_MODE
-#define LEDC_CHANNEL LEDC_CHANNEL_0
-#define LEDC_DUTY_RES LEDC_TIMER_13_BIT
-#define LEDC_FREQUENCY 4000
 
 #define KEY_UP_GPIO 2
 #define KEY_DOWN_GPIO 13
@@ -48,28 +42,6 @@ static KeyState keys[] = {
     {KEY_B_GPIO, KEY_B, "B", false, false, 0},
 };
 
-static void buzzer_init(void)
-{
-    ledc_timer_config_t ledc_timer = {
-        .speed_mode = LEDC_MODE,
-        .timer_num = LEDC_TIMER,
-        .duty_resolution = LEDC_DUTY_RES,
-        .freq_hz = LEDC_FREQUENCY,
-        .clk_cfg = LEDC_AUTO_CLK
-    };
-    ledc_timer_config(&ledc_timer);
-
-    ledc_channel_config_t ledc_channel = {
-        .speed_mode = LEDC_MODE,
-        .channel = LEDC_CHANNEL,
-        .timer_sel = LEDC_TIMER,
-        .intr_type = LEDC_INTR_DISABLE,
-        .gpio_num = BUZZER_GPIO,
-        .duty = 0,
-        .hpoint = 0
-    };
-    ledc_channel_config(&ledc_channel);
-}
 
 static void key_init(void)
 {
@@ -124,6 +96,7 @@ static void key_scan_task(void* arg)
                     if (current) {
                         ESP_LOGI(TAG, ">>> Key %s (GPIO%d) PRESSED! raw=%d",
                                  keys[i].name, keys[i].gpio, raw);
+                        sound_play(SOUND_KEY_CLICK);
                         chess_ui_handle_key(keys[i].key);
                     } else {
                         ESP_LOGI(TAG, "<<< Key %s (GPIO%d) released",
@@ -203,7 +176,7 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "XiaoMiao Chess starting...");
 
-    buzzer_init();
+    sound_init();
     key_init();
 
     ESP_LOGI(TAG, "Initialize TFT display");

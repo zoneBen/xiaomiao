@@ -1,0 +1,54 @@
+#ifndef SOUND_H
+#define SOUND_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+// Sound types
+typedef enum {
+    SOUND_KEY_CLICK,
+    SOUND_MOVE,
+    SOUND_CAPTURE,
+    SOUND_CHECK,
+    SOUND_CHECKMATE,
+    SOUND_MENU_SELECT,
+    SOUND_GAME_START,
+    SOUND_MAX
+} SoundType;
+
+// Musical notes frequencies (Hz)
+#define NOTE_C4  262
+#define NOTE_D4  294
+#define NOTE_E4  330
+#define NOTE_F4  349
+#define NOTE_G4  392
+#define NOTE_A4  440
+#define NOTE_B4  494
+#define NOTE_C5  523
+#define NOTE_D5  587
+#define NOTE_E5  659
+#define NOTE_F5  698
+#define NOTE_G5  784
+#define NOTE_A5  880
+#define NOTE_B5  988
+
+// Initialize sound system
+void sound_init(void);
+
+// Play a specific sound effect
+void sound_play(SoundType sound);
+
+// Play a single tone
+void sound_play_tone(uint32_t frequency, uint32_t duration_ms);
+
+// Start/stop background music
+void sound_start_background_music(void);
+void sound_stop_background_music(void);
+
+// Set background music volume (0-100)
+void sound_set_music_volume(uint8_t volume);
+
+// Enable/disable sound effects
+void sound_set_effects_enabled(bool enabled);
+
+#endif
