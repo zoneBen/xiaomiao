@@ -167,7 +167,10 @@ static KeyState keys[] = {
 
 static void keypad_read(lv_indev_t* indev, lv_indev_data_t* data) {
     static uint32_t last_key = 0;
+    static int call_count = 0;
     bool has_pressed = false;
+
+    call_count++;
 
     for (int i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         if (keys[i].pressed) {
@@ -175,6 +178,9 @@ static void keypad_read(lv_indev_t* indev, lv_indev_data_t* data) {
             data->state = LV_INDEV_STATE_PRESSED;
             last_key = keys[i].lv_key;
             has_pressed = true;
+            if (call_count % 20 == 0) {
+                ESP_LOGI(TAG, "keypad_read: sending key %d (LV_KEY=%d) PRESSED", i, keys[i].lv_key);
+            }
             break;
         }
     }
@@ -183,35 +189,42 @@ static void keypad_read(lv_indev_t* indev, lv_indev_data_t* data) {
         data->key = last_key;
         data->state = LV_INDEV_STATE_RELEASED;
     }
+
+    if (call_count % 200 == 0) {
+        ESP_LOGI(TAG, "keypad_read called %d times", call_count);
+    }
 }
 
 static void key_scan_task(void* arg) {
     TickType_t last_wakeup = xTaskGetTickCount();
-    const TickType_t scan_delay = pdMS_TO_TICKS(5);
-    const TickType_t min_delay = (scan_delay > 0) ? scan_delay : 1;
+    const TickType_t scan_delay = pdMS_TO_TICKS(10);
+
+    ESP_LOGI(TAG, "Key scan task started");
 
     while (1) {
         for (int i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
-            bool current = key_get_state(keys[i].gpio);
-            TickType_t now = xTaskGetTickCount();
+            bool raw = gpio_get_level(keys[i].gpio);
+            bool current = (raw == 0);  // Low = pressed for pull-up configuration
 
             if (current != keys[i].last_state) {
-                keys[i].debounce_tick = now;
-                keys[i].debounced = false;
+                keys[i].debounce_tick = xTaskGetTickCount();
             }
 
-            if (!keys[i].debounced &&
-                (now - keys[i].debounce_tick) >= pdMS_TO_TICKS(KEY_DEBOUNCE_MS)) {
-                keys[i].debounced = true;
+            if ((xTaskGetTickCount() - keys[i].debounce_tick) >= pdMS_TO_TICKS(20)) {
                 if (current != keys[i].pressed) {
                     keys[i].pressed = current;
+                    if (current) {
+                        ESP_LOGI(TAG, "Key %d (GPIO %d) PRESSED (raw=%d)", i, keys[i].gpio, raw);
+                    } else {
+                        ESP_LOGI(TAG, "Key %d (GPIO %d) released (raw=%d)", i, keys[i].gpio, raw);
+                    }
                 }
             }
 
             keys[i].last_state = current;
         }
 
-        vTaskDelayUntil(&last_wakeup, min_delay);
+        vTaskDelayUntil(&last_wakeup, scan_delay);
     }
 }
 
@@ -319,10 +332,19 @@ void app_main(void) {
     };
     ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(panel_io_handle, &cbs, display));
 
+    ESP_LOGI(TAG, "Initialize UI lock");
+    ui_lock_init();
+
+    ESP_LOGI(TAG, "Initialize chess UI");
+    ui_lock_acquire();
+    chess_ui_init();
+    ui_lock_release();
+
     lv_indev_t* indev_keypad = lv_indev_create();
     lv_indev_set_type(indev_keypad, LV_INDEV_TYPE_KEYPAD);
     lv_indev_set_read_cb(indev_keypad, keypad_read);
     lv_indev_set_group(indev_keypad, chess_ui_get_group());
+    ESP_LOGI(TAG, "Keypad input device created and group set");
 
     xTaskCreate(lvgl_port_task, "LVGL", LVGL_TASK_STACK_SIZE, NULL, LVGL_TASK_PRIORITY, NULL);
     xTaskCreate(key_scan_task, "KeyScan", 2048, NULL, 5, NULL);
@@ -336,14 +358,6 @@ void app_main(void) {
     chess_network_set_state_callback(chess_network_state_change);
     chess_network_set_invite_callback(chess_invite_received);
     chess_network_set_move_callback(chess_move_received);
-
-    ESP_LOGI(TAG, "Initialize UI lock");
-    ui_lock_init();
-
-    ESP_LOGI(TAG, "Initialize chess UI");
-    ui_lock_acquire();
-    chess_ui_init();
-    ui_lock_release();
 
     ESP_LOGI(TAG, "XiaoMiao Chess started!");
 

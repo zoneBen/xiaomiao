@@ -240,15 +240,16 @@ static void btn_reject_invite_cb(lv_event_t* e) {
 static void create_main_menu_screen(void) {
     g_ui->screen_main = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(g_ui->screen_main, lv_color_hex(0x1a1a2e), 0);
+    lv_obj_set_layout(g_ui->screen_main, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(g_ui->screen_main, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(g_ui->screen_main, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_SPACE_EVENLY);
 
     lv_obj_t* title = lv_label_create(g_ui->screen_main);
     lv_label_set_text(title, "♔ Chess ♚");
     lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
 
     lv_obj_t* btn_local = lv_btn_create(g_ui->screen_main);
     lv_obj_set_size(btn_local, 140, 50);
-    lv_obj_align(btn_local, LV_ALIGN_CENTER, 0, -30);
     lv_obj_add_flag(btn_local, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
     lv_group_add_obj(g_group, btn_local);
     lv_obj_t* label_local = lv_label_create(btn_local);
@@ -257,7 +258,6 @@ static void create_main_menu_screen(void) {
 
     lv_obj_t* btn_network = lv_btn_create(g_ui->screen_main);
     lv_obj_set_size(btn_network, 140, 50);
-    lv_obj_align(btn_network, LV_ALIGN_CENTER, 0, 40);
     lv_obj_add_flag(btn_network, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
     lv_group_add_obj(g_group, btn_network);
     lv_obj_t* label_network = lv_label_create(btn_network);
@@ -417,15 +417,16 @@ static void create_lobby_screen(void) {
 static void create_game_screen(void) {
     g_ui->screen_game = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(g_ui->screen_game, lv_color_hex(0x1a1a2e), 0);
+    lv_obj_set_layout(g_ui->screen_game, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(g_ui->screen_game, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(g_ui->screen_game, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_SPACE_AROUND);
 
     g_ui->turn_label = lv_label_create(g_ui->screen_game);
     lv_label_set_text(g_ui->turn_label, "Turn: White");
     lv_obj_set_style_text_color(g_ui->turn_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_align(g_ui->turn_label, LV_ALIGN_TOP_MID, 0, 5);
 
     g_ui->board_container = lv_obj_create(g_ui->screen_game);
     lv_obj_set_size(g_ui->board_container, 128, 128);
-    lv_obj_align(g_ui->board_container, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_pad_all(g_ui->board_container, 2, 0);
     lv_obj_set_style_bg_color(g_ui->board_container, lv_color_hex(0x000000), 0);
     lv_obj_set_layout(g_ui->board_container, LV_LAYOUT_GRID);
@@ -503,6 +504,7 @@ void chess_ui_init(void) {
     }
 
     g_group = lv_group_create();
+    lv_group_set_default(g_group);
 
     g_ui = (ChessUIContext*)calloc(1, sizeof(ChessUIContext));
     if (!g_ui) {
