@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <unistd.h>
-#include <sys/lock.h>
 #include <sys/param.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -16,37 +15,36 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "lvgl.h"
+#include "chess.h"
+#include "chess_ui.h"
+#include "chess_network.h"
+#include "network.h"
+#include "ui_lock.h"
 
-static const char *TAG = "xiaomiao";
+static const char* TAG = "xiaomiao";
 
-// SPI LCD Configuration
 #define LCD_HOST SPI2_HOST
 #define LCD_PIXEL_CLOCK_HZ (40 * 1000 * 1000)
 
-// LCD Pins (XiaoMiao pinout)
 #define LCD_PIN_SCLK 18
 #define LCD_PIN_MOSI 23
 #define LCD_PIN_DC 4
 #define LCD_PIN_RST 19
 #define LCD_PIN_CS 5
 
-// LCD Resolution
 #define LCD_H_RES 160
 #define LCD_V_RES 128
 
-// LCD Command/Param bits
 #define LCD_CMD_BITS 8
 #define LCD_PARAM_BITS 8
 
-// LVGL Configuration
 #define LVGL_DRAW_BUF_LINES 20
 #define LVGL_TICK_PERIOD_MS 2
 #define LVGL_TASK_MAX_DELAY_MS 500
 #define LVGL_TASK_MIN_DELAY_MS 1000 / CONFIG_FREERTOS_HZ
-#define LVGL_TASK_STACK_SIZE (4 * 1024)
+#define LVGL_TASK_STACK_SIZE (8 * 1024)
 #define LVGL_TASK_PRIORITY 2
 
-// Buzzer Configuration
 #define BUZZER_GPIO 14
 #define LEDC_TIMER LEDC_TIMER_0
 #define LEDC_MODE LEDC_LOW_SPEED_MODE
@@ -54,7 +52,6 @@ static const char *TAG = "xiaomiao";
 #define LEDC_DUTY_RES LEDC_TIMER_13_BIT
 #define LEDC_FREQUENCY 4000
 
-// Button Pins
 #define KEY_UP_GPIO 2
 #define KEY_DOWN_GPIO 13
 #define KEY_LEFT_GPIO 27
@@ -62,40 +59,44 @@ static const char *TAG = "xiaomiao";
 #define KEY_A_GPIO 34
 #define KEY_B_GPIO 12
 
-// ADC Sensor Pins
-#define LIGHT_SENSOR_ADC_CHANNEL ADC_CHANNEL_0  // GPIO36
-#define TEMP_SENSOR_ADC_CHANNEL ADC_CHANNEL_3   // GPIO39
-#define ADC_UNIT ADC_UNIT_1
-#define ADC_ATTENUATION ADC_ATTEN_DB_11
-
-// LVGL mutex for thread safety
-static _lock_t lvgl_api_lock;
-
-// LCD handles
 static esp_lcd_panel_io_handle_t panel_io_handle = NULL;
 static esp_lcd_panel_handle_t panel_handle = NULL;
 
-// UI elements
-static lv_obj_t *status_label = NULL;
-static lv_obj_t *light_label = NULL;
-static lv_obj_t *temp_label = NULL;
-static char key_text[32] = "Press any key!";
-static char light_text[32] = "Light: ---";
-static char temp_text[32] = "Temp: --.- C";
+static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t* edata, void* user_ctx) {
+    lv_display_t* disp = (lv_display_t*)user_ctx;
+    lv_display_flush_ready(disp);
+    return false;
+}
 
-// ADC handles
-static adc_oneshot_unit_handle_t adc_handle = NULL;
+static void lvgl_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
+    esp_lcd_panel_handle_t panel_handle = lv_display_get_user_data(disp);
+    int offsetx1 = area->x1;
+    int offsetx2 = area->x2;
+    int offsety1 = area->y1;
+    int offsety2 = area->y2;
 
-// Button states
-static bool key_up_pressed(void) { return gpio_get_level(KEY_UP_GPIO) == 0; }
-static bool key_down_pressed(void) { return gpio_get_level(KEY_DOWN_GPIO) == 0; }
-static bool key_left_pressed(void) { return gpio_get_level(KEY_LEFT_GPIO) == 0; }
-static bool key_right_pressed(void) { return gpio_get_level(KEY_RIGHT_GPIO) == 0; }
-static bool key_a_pressed(void) { return gpio_get_level(KEY_A_GPIO) == 0; }
-static bool key_b_pressed(void) { return gpio_get_level(KEY_B_GPIO) == 0; }
+    lv_draw_sw_rgb565_swap(px_map, (offsetx2 + 1 - offsetx1) * (offsety2 + 1 - offsety1));
+    esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, px_map);
+}
 
-static void buzzer_init(void)
-{
+static void increase_lvgl_tick(void* arg) {
+    lv_tick_inc(LVGL_TICK_PERIOD_MS);
+}
+
+static void lvgl_port_task(void* arg) {
+    ESP_LOGI(TAG, "Starting LVGL task");
+    uint32_t time_till_next_ms = 0;
+    while (1) {
+        ui_lock_acquire();
+        time_till_next_ms = lv_timer_handler();
+        ui_lock_release();
+        time_till_next_ms = MAX(time_till_next_ms, LVGL_TASK_MIN_DELAY_MS);
+        time_till_next_ms = MIN(time_till_next_ms, LVGL_TASK_MAX_DELAY_MS);
+        usleep(1000 * time_till_next_ms);
+    }
+}
+
+static void buzzer_init(void) {
     ledc_timer_config_t ledc_timer = {
         .speed_mode = LEDC_MODE,
         .timer_num = LEDC_TIMER,
@@ -117,181 +118,40 @@ static void buzzer_init(void)
     ledc_channel_config(&ledc_channel);
 }
 
-static void buzzer_play_tone(uint32_t freq, uint32_t duration_ms)
-{
-    if (freq == 0) {
-        ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, 0);
-        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
-        return;
+static void network_state_change(NetworkState state) {
+    const char* status_str = "Unknown";
+    switch (state) {
+        case NETWORK_STATE_DISCONNECTED: status_str = "Status: Disconnected"; break;
+        case NETWORK_STATE_CONNECTING_WIFI: status_str = "Status: Connecting WiFi..."; break;
+        case NETWORK_STATE_WIFI_CONNECTED: status_str = "Status: WiFi Connected"; break;
+        case NETWORK_STATE_CONNECTING_MQTT: status_str = "Status: Connecting MQTT..."; break;
+        case NETWORK_STATE_MQTT_CONNECTED: status_str = "Status: Connected"; break;
+        case NETWORK_STATE_ERROR: status_str = "Status: Error"; break;
     }
-
-    ledc_set_freq(LEDC_MODE, LEDC_TIMER, freq);
-    ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, (1 << (LEDC_DUTY_RES - 1)));
-    ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
-
-    vTaskDelay(pdMS_TO_TICKS(duration_ms));
-
-    ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, 0);
-    ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
+    chess_ui_set_network_status(status_str);
 }
 
-static void keys_init(void)
-{
-    // Configure GPIOs with pull-up
-    gpio_config_t io_conf = {
-        .intr_type = GPIO_INTR_DISABLE,
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = (1ULL << KEY_UP_GPIO) | (1ULL << KEY_DOWN_GPIO) |
-                        (1ULL << KEY_LEFT_GPIO) | (1ULL << KEY_B_GPIO),
-        .pull_down_en = 0,
-        .pull_up_en = 1
-    };
-    gpio_config(&io_conf);
-
-    // GPIOs 34-39 are input-only
-    gpio_config_t io_conf_no_pull = {
-        .intr_type = GPIO_INTR_DISABLE,
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = (1ULL << KEY_RIGHT_GPIO) | (1ULL << KEY_A_GPIO),
-        .pull_down_en = 0,
-        .pull_up_en = 0
-    };
-    gpio_config(&io_conf_no_pull);
+static void chess_network_state_change(ChessNetworkState state) {
+    ESP_LOGI(TAG, "Chess network state: %d", state);
 }
 
-static void adc_sensors_init(void)
-{
-    // Configure ADC one-shot mode
-    adc_oneshot_unit_init_cfg_t unit_cfg = {
-        .unit_id = ADC_UNIT,
-        .ulp_mode = ADC_ULP_MODE_DISABLE,
-    };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &adc_handle));
-
-    // Configure channels
-    adc_oneshot_chan_cfg_t chan_cfg = {
-        .atten = ADC_ATTENUATION,
-        .bitwidth = ADC_BITWIDTH_DEFAULT,
-    };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, LIGHT_SENSOR_ADC_CHANNEL, &chan_cfg));
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, TEMP_SENSOR_ADC_CHANNEL, &chan_cfg));
+static void chess_invite_received(const char* opponent_id) {
+    ESP_LOGI(TAG, "Received invite from %s", opponent_id);
+    chess_ui_show_invite_dialog(opponent_id);
 }
 
-static int read_light_sensor(void)
-{
-    int value = 0;
-    esp_err_t ret = adc_oneshot_read(adc_handle, LIGHT_SENSOR_ADC_CHANNEL, &value);
-    return (ret == ESP_OK) ? value : 0;
+static void chess_move_received(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion) {
+    ESP_LOGI(TAG, "Received move: %d,%d -> %d,%d", from_x, from_y, to_x, to_y);
+    // This callback needs to update UI with lock protection
+    ui_lock_acquire();
+    // TODO: Actually apply the move to the game state
+    ui_lock_release();
 }
 
-static int read_temp_sensor(void)
-{
-    int value = 0;
-    esp_err_t ret = adc_oneshot_read(adc_handle, TEMP_SENSOR_ADC_CHANNEL, &value);
-    return (ret == ESP_OK) ? value : 0;
-}
+void app_main(void) {
+    ESP_LOGI(TAG, "XiaoMiao Chess starting...");
 
-static float adc_to_temperature(int adc_value)
-{
-    // Simple NTC thermistor approximation
-    // Assuming 10k NTC, 10k pull-up, 25C nominal
-    // This is a basic linear approximation for demonstration
-    float voltage = (float)adc_value / 4095.0f * 3.3f;
-    float temp = 25.0f + (voltage - 1.65f) * 50.0f;
-    return temp;
-}
-
-static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
-{
-    lv_display_t *disp = (lv_display_t *)user_ctx;
-    lv_display_flush_ready(disp);
-    return false;
-}
-
-static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
-{
-    esp_lcd_panel_handle_t panel_handle = lv_display_get_user_data(disp);
-    int offsetx1 = area->x1;
-    int offsetx2 = area->x2;
-    int offsety1 = area->y1;
-    int offsety2 = area->y2;
-
-    lv_draw_sw_rgb565_swap(px_map, (offsetx2 + 1 - offsetx1) * (offsety2 + 1 - offsety1));
-    esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, px_map);
-}
-
-static void increase_lvgl_tick(void *arg)
-{
-    lv_tick_inc(LVGL_TICK_PERIOD_MS);
-}
-
-static void lvgl_port_task(void *arg)
-{
-    ESP_LOGI(TAG, "Starting LVGL task");
-    uint32_t time_till_next_ms = 0;
-    while (1) {
-        _lock_acquire(&lvgl_api_lock);
-        time_till_next_ms = lv_timer_handler();
-        _lock_release(&lvgl_api_lock);
-        time_till_next_ms = MAX(time_till_next_ms, LVGL_TASK_MIN_DELAY_MS);
-        time_till_next_ms = MIN(time_till_next_ms, LVGL_TASK_MAX_DELAY_MS);
-        usleep(1000 * time_till_next_ms);
-    }
-}
-
-static void create_ui(lv_display_t *disp)
-{
-    lv_obj_t *scr = lv_display_get_screen_active(disp);
-
-    // Set background color
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
-
-    // Title label
-    lv_obj_t *title_label = lv_label_create(scr);
-    lv_label_set_text(title_label, "XiaoMiao");
-    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 5);
-    lv_obj_set_style_text_color(title_label, lv_color_hex(0x00FF00), 0);
-    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
-
-    // Light sensor label
-    light_label = lv_label_create(scr);
-    lv_label_set_text(light_label, light_text);
-    lv_obj_align(light_label, LV_ALIGN_TOP_MID, 0, 30);
-    lv_obj_set_style_text_color(light_label, lv_color_hex(0xFFFF00), 0);
-    lv_obj_set_style_text_font(light_label, &lv_font_montserrat_14, 0);
-
-    // Temperature sensor label
-    temp_label = lv_label_create(scr);
-    lv_label_set_text(temp_label, temp_text);
-    lv_obj_align(temp_label, LV_ALIGN_TOP_MID, 0, 55);
-    lv_obj_set_style_text_color(temp_label, lv_color_hex(0xFF8800), 0);
-    lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_14, 0);
-
-    // Status label - save reference for updates
-    status_label = lv_label_create(scr);
-    lv_label_set_text(status_label, key_text);
-    lv_obj_align(status_label, LV_ALIGN_CENTER, 0, 15);
-    lv_obj_set_style_text_color(status_label, lv_color_hex(0xFFFFFF), 0);
-
-    // Key labels
-    lv_obj_t *keys_label = lv_label_create(scr);
-    lv_label_set_text(keys_label, "U D L R A B");
-    lv_obj_align(keys_label, LV_ALIGN_BOTTOM_MID, 0, -10);
-    lv_obj_set_style_text_color(keys_label, lv_color_hex(0x888888), 0);
-}
-
-void app_main(void)
-{
-    ESP_LOGI(TAG, "XiaoMiao starting...");
-
-    // Initialize buzzer
     buzzer_init();
-
-    // Initialize keys
-    keys_init();
-
-    // Initialize ADC sensors
-    adc_sensors_init();
 
     ESP_LOGI(TAG, "Initialize SPI bus");
     spi_bus_config_t buscfg = {
@@ -330,22 +190,17 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle, true));
     ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
 
-    // Set screen gap for ST7789
-    //esp_lcd_panel_set_gap(panel_handle, 40, 40);
-
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
     ESP_LOGI(TAG, "Initialize LVGL library");
     lv_init();
 
-    // Create LVGL display
-    lv_display_t *display = lv_display_create(LCD_H_RES, LCD_V_RES);
+    lv_display_t* display = lv_display_create(LCD_H_RES, LCD_V_RES);
 
-    // Allocate draw buffers
     size_t draw_buffer_sz = LCD_H_RES * LVGL_DRAW_BUF_LINES * sizeof(lv_color16_t);
-    void *buf1 = spi_bus_dma_memory_alloc(LCD_HOST, draw_buffer_sz, 0);
+    void* buf1 = spi_bus_dma_memory_alloc(LCD_HOST, draw_buffer_sz, 0);
     assert(buf1);
-    void *buf2 = spi_bus_dma_memory_alloc(LCD_HOST, draw_buffer_sz, 0);
+    void* buf2 = spi_bus_dma_memory_alloc(LCD_HOST, draw_buffer_sz, 0);
     assert(buf2);
 
     lv_display_set_buffers(display, buf1, buf2, draw_buffer_sz, LV_DISPLAY_RENDER_MODE_PARTIAL);
@@ -353,7 +208,6 @@ void app_main(void)
     lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
     lv_display_set_flush_cb(display, lvgl_flush_cb);
 
-    // Install LVGL tick timer
     const esp_timer_create_args_t lvgl_tick_timer_args = {
         .callback = &increase_lvgl_tick,
         .name = "lvgl_tick"
@@ -362,91 +216,34 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, LVGL_TICK_PERIOD_MS * 1000));
 
-    // Register event callback for flush ready
     const esp_lcd_panel_io_callbacks_t cbs = {
         .on_color_trans_done = notify_lvgl_flush_ready,
     };
     ESP_ERROR_CHECK(esp_lcd_panel_io_register_event_callbacks(panel_io_handle, &cbs, display));
 
-    // Create LVGL task
     xTaskCreate(lvgl_port_task, "LVGL", LVGL_TASK_STACK_SIZE, NULL, LVGL_TASK_PRIORITY, NULL);
 
-    // Create UI
-    _lock_acquire(&lvgl_api_lock);
-    create_ui(display);
-    _lock_release(&lvgl_api_lock);
+    ESP_LOGI(TAG, "Initialize network");
+    network_init();
+    network_set_state_callback(network_state_change);
 
-    ESP_LOGI(TAG, "XiaoMiao started!");
+    ESP_LOGI(TAG, "Initialize chess network");
+    chess_network_init();
+    chess_network_set_state_callback(chess_network_state_change);
+    chess_network_set_invite_callback(chess_invite_received);
+    chess_network_set_move_callback(chess_move_received);
 
-    bool last_state = false;
-    int last_sensor_update = 0;
+    ESP_LOGI(TAG, "Initialize UI lock");
+    ui_lock_init();
+
+    ESP_LOGI(TAG, "Initialize chess UI");
+    ui_lock_acquire();
+    chess_ui_init();
+    ui_lock_release();
+
+    ESP_LOGI(TAG, "XiaoMiao Chess started!");
 
     while (1) {
-        // Read sensors every 500ms
-        int now = xTaskGetTickCount();
-        if (now - last_sensor_update > pdMS_TO_TICKS(500)) {
-            int light_val = read_light_sensor();
-            int temp_adc = read_temp_sensor();
-            float temp_c = adc_to_temperature(temp_adc);
-
-            // Update sensor display
-            if (light_label && temp_label) {
-                _lock_acquire(&lvgl_api_lock);
-                snprintf(light_text, sizeof(light_text), "Light: %4d", light_val);
-                snprintf(temp_text, sizeof(temp_text), "Temp: %4.1f C", temp_c);
-                lv_label_set_text(light_label, light_text);
-                lv_label_set_text(temp_label, temp_text);
-                _lock_release(&lvgl_api_lock);
-            }
-
-            ESP_LOGI(TAG, "Light: %d, Temp ADC: %d, Temp: %.1f C", light_val, temp_adc, temp_c);
-            last_sensor_update = now;
-        }
-
-        // Check keys
-        bool any_key = key_up_pressed() || key_down_pressed() ||
-                       key_left_pressed() || key_right_pressed() ||
-                       key_a_pressed() || key_b_pressed();
-
-        if (any_key && !last_state) {
-            const char *key_name = "Unknown";
-            uint32_t tone_freq = 0;
-
-            if (key_up_pressed()) {
-                key_name = "UP";
-                tone_freq = 523;
-            } else if (key_down_pressed()) {
-                key_name = "DOWN";
-                tone_freq = 587;
-            } else if (key_left_pressed()) {
-                key_name = "LEFT";
-                tone_freq = 659;
-            } else if (key_right_pressed()) {
-                key_name = "RIGHT";
-                tone_freq = 698;
-            } else if (key_a_pressed()) {
-                key_name = "A";
-                tone_freq = 784;
-            } else if (key_b_pressed()) {
-                key_name = "B";
-                tone_freq = 880;
-            }
-
-            // Play tone
-            buzzer_play_tone(tone_freq, 100);
-
-            // Update screen display - with LVGL lock
-            if (status_label) {
-                _lock_acquire(&lvgl_api_lock);
-                snprintf(key_text, sizeof(key_text), "Pressed: %s!", key_name);
-                lv_label_set_text(status_label, key_text);
-                _lock_release(&lvgl_api_lock);
-            }
-
-            ESP_LOGI(TAG, "Key pressed: %s", key_name);
-        }
-
-        last_state = any_key;
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

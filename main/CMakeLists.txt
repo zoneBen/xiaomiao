@@ -1,7 +1,3 @@
-idf_component_register(SRCS "xiaomiao-01.c"
-                         INCLUDE_DIRS "."
-                         REQUIRES esp_lcd driver esp_timer esp_adc)
-
- if(LVGL_VERSION)
-      message(STATUS "Found LVGL version ${LVGL_VERSION}")
-  endif()
+idf_component_register(SRCS "xiaomiao-01.c" "chess.c" "network.c" "chess_network.c" "chess_ui.c" "ui_lock.c"
+                       INCLUDE_DIRS "."
+                       REQUIRES esp_lcd driver esp_timer esp_adc lvgl esp_wifi mqtt nvs_flash json)
