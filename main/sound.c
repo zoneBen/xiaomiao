@@ -66,6 +66,7 @@ static const Note effect_capture[] = {{NOTE_G4, 100}, {NOTE_C5, 150}};
 static const Note effect_check[] = {{NOTE_E5, 100}, {NOTE_G5, 100}, {NOTE_E5, 100}};
 static const Note effect_checkmate[] = {{NOTE_G4, 200}, {NOTE_E4, 200}, {NOTE_C4, 400}};
 static const Note effect_game_start[] = {{NOTE_C4, 100}, {NOTE_E4, 100}, {NOTE_G4, 100}, {NOTE_C5, 300}};
+static const Note effect_invalid_move[] = {{NOTE_DS4, 100}, {NOTE_C4, 150}};
 
 static void set_buzzer_duty(uint32_t duty)
 {
@@ -207,6 +208,9 @@ void sound_play(SoundType sound)
             break;
         case SOUND_GAME_START:
             queue_sequence(effect_game_start, 4, 60);
+            break;
+        case SOUND_INVALID_MOVE:
+            queue_sequence(effect_invalid_move, 2, 50);
             break;
         default:
             break;

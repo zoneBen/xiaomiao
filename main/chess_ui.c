@@ -392,6 +392,7 @@ void chess_ui_handle_key(KeyCode key)
                         g_ui->selected_y = g_ui->cursor_y;
                     } else {
                         // Invalid move, deselect
+                        sound_play(SOUND_INVALID_MOVE);
                         g_ui->has_selection = false;
                         g_ui->selected_x = -1;
                         g_ui->selected_y = -1;
@@ -403,6 +404,12 @@ void chess_ui_handle_key(KeyCode key)
                         g_ui->selected_x = g_ui->cursor_x;
                         g_ui->selected_y = g_ui->cursor_y;
                         g_ui->has_selection = true;
+                    } else if (piece.type != PIECE_NONE) {
+                        // Tried to select opponent's piece - invalid
+                        sound_play(SOUND_INVALID_MOVE);
+                    } else {
+                        // Tried to select empty square - invalid
+                        sound_play(SOUND_INVALID_MOVE);
                     }
                 }
             } else if (key == KEY_B) {
