@@ -40,14 +40,14 @@ extern "C" {
 #define TFT_VIOLET      0x915C
 
 // Chess board colors
-#define COLOR_LIGHT_SQUARE RGB_TO_RGB565(0xFF, 0xE5, 0xB4)  // Light beige
-#define COLOR_DARK_SQUARE  RGB_TO_RGB565(0x8B, 0x45, 0x13)  // Dark brown
+#define COLOR_LIGHT_SQUARE RGB_TO_RGB565(0x8B, 0x73, 0x55)  // Darker beige
+#define COLOR_DARK_SQUARE  RGB_TO_RGB565(0x3D, 0x23, 0x0A)  // Very dark brown
 #define COLOR_WHITE_PIECE  TFT_WHITE
 #define COLOR_BLACK_PIECE  TFT_BLACK
 #define COLOR_CURSOR       0x07FF    // Cyan for cursor
 #define COLOR_SELECTED     0x07E0    // Green for selected
-#define COLOR_BACKGROUND   RGB_TO_RGB565(0x1A, 0x1A, 0x2E)  // Dark blue-grey
-#define COLOR_DIALOG       RGB_TO_RGB565(0x2A, 0x2A, 0x4A)  // Dialog background
+#define COLOR_BACKGROUND   TFT_BLACK
+#define COLOR_DIALOG       RGB_TO_RGB565(0x1A, 0x1A, 0x1A)  // Dark gray dialog
 #define COLOR_TEXT         TFT_WHITE
 
 // Convert RGB888 to RGB565

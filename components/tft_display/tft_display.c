@@ -14,7 +14,7 @@ static const char* TAG = "TFT";
 
 // SPI configuration
 #define LCD_HOST SPI2_HOST
-#define LCD_PIXEL_CLOCK_HZ (40 * 1000 * 1000)
+#define LCD_PIXEL_CLOCK_HZ (26 * 1000 * 1000)
 
 #define LCD_PIN_SCLK 18
 #define LCD_PIN_MOSI 23
@@ -189,7 +189,7 @@ esp_err_t tft_display_init(void)
         return ret;
     }
 
-    ret = esp_lcd_panel_invert_color(panel_handle, true);
+    ret = esp_lcd_panel_invert_color(panel_handle, false);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Panel invert color failed");
         return ret;

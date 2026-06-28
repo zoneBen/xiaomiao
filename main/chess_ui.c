@@ -7,6 +7,9 @@
 #include "sound.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -60,6 +63,9 @@ typedef struct {
     // Screen buffer
     TFT_Sprite sprite;
     bool sprite_created;
+
+    // Refresh throttling
+    int64_t last_render_tick;
 } ChessUIContext;
 
 static ChessUIContext* g_ui = NULL;
@@ -126,6 +132,9 @@ void chess_ui_init(void)
     } else {
         ESP_LOGE(TAG, "Failed to create sprite buffer");
     }
+
+    // Initialize last render time
+    g_ui->last_render_tick = esp_timer_get_time() - 100000;  // Ensure first render happens
 
     ESP_LOGI(TAG, "Chess UI initialized");
 }
@@ -455,6 +464,13 @@ void chess_ui_update(void)
 static void chess_ui_render_internal(void)
 {
     if (!g_ui || !g_ui->sprite_created) return;
+
+    // Throttle rendering to max 30 FPS (33ms per frame)
+    int64_t now = esp_timer_get_time();
+    if (now - g_ui->last_render_tick < 33000) {  // 33ms = ~30 FPS
+        return;
+    }
+    g_ui->last_render_tick = now;
 
     // Clear sprite
     tft_sprite_fill_screen(&g_ui->sprite, COLOR_BACKGROUND);
