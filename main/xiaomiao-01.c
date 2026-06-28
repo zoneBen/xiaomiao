@@ -15,6 +15,19 @@
 
 static const char* TAG = "xiaomiao";
 
+// Flags to request UI updates from Bluetooth callbacks
+static volatile bool s_render_requested = false;
+static volatile bool s_screen_switch_requested = false;
+static volatile ChessScreen s_requested_screen = SCREEN_MAIN_MENU;
+
+// Structure to hold pending move from opponent
+static volatile bool s_move_pending = false;
+static volatile int s_move_from_x = 0;
+static volatile int s_move_from_y = 0;
+static volatile int s_move_to_x = 0;
+static volatile int s_move_to_y = 0;
+static volatile ChessPieceType s_move_promotion = PIECE_NONE;
+
 
 #define KEY_UP_GPIO 2
 #define KEY_DOWN_GPIO 13
@@ -125,13 +138,37 @@ static void key_scan_task(void* arg)
 static void ui_update_task(void* arg)
 {
     TickType_t last_wakeup = xTaskGetTickCount();
-    const TickType_t update_delay = pdMS_TO_TICKS(100);
+    const TickType_t update_delay = pdMS_TO_TICKS(50);  // Faster updates for Bluetooth
 
     ESP_LOGI(TAG, "UI update task started");
 
     while (1) {
         ui_lock_acquire();
+
+        // Handle screen switch requests first
+        if (s_screen_switch_requested) {
+            s_screen_switch_requested = false;
+            ESP_LOGI(TAG, "Switching screen to %d from UI task", s_requested_screen);
+            chess_ui_switch_screen(s_requested_screen);
+        }
+
+        // Handle pending opponent move
+        if (s_move_pending) {
+            s_move_pending = false;
+            ESP_LOGI(TAG, "Applying opponent move from UI task");
+            chess_ui_apply_opponent_move(s_move_from_x, s_move_from_y,
+                                        s_move_to_x, s_move_to_y, s_move_promotion);
+        }
+
+        // Handle render requests
+        if (s_render_requested) {
+            s_render_requested = false;
+            chess_ui_render();
+        }
+
+        // Regular UI update
         chess_ui_update();
+
         ui_lock_release();
 
         vTaskDelayUntil(&last_wakeup, update_delay);
@@ -142,32 +179,36 @@ static void ui_update_task(void* arg)
 static void bt_chess_state_change(BluetoothChessState state)
 {
     ESP_LOGI(TAG, "Bluetooth state: %d", state);
-    // Update UI status
-    chess_ui_render();
+    // Request UI update (don't render directly from callback!)
+    s_render_requested = true;
 }
 
 static void bt_chess_device_found(const FoundBluetoothDevice* device, int index)
 {
     ESP_LOGI(TAG, "Found device %d: %s", index, device->name);
-    chess_ui_render();
+    s_render_requested = true;
 }
 
 static void bt_chess_device_list_complete(int count)
 {
     ESP_LOGI(TAG, "Device list complete: %d devices", count);
-    chess_ui_render();
+    s_render_requested = true;
 }
 
 static void bt_chess_connected(void)
 {
     ESP_LOGI(TAG, "Bluetooth connected");
-    chess_ui_switch_screen(SCREEN_BLUETOOTH_WAITING);
+    // Request screen switch from UI update task
+    s_requested_screen = SCREEN_BLUETOOTH_WAITING;
+    s_screen_switch_requested = true;
 }
 
 static void bt_chess_disconnected(void)
 {
     ESP_LOGI(TAG, "Bluetooth disconnected");
-    chess_ui_switch_screen(SCREEN_BLUETOOTH_MENU);
+    // Request screen switch from UI update task
+    s_requested_screen = SCREEN_BLUETOOTH_MENU;
+    s_screen_switch_requested = true;
 }
 
 static void bt_chess_invite_received(void)
@@ -181,20 +222,27 @@ static void bt_chess_invite_received(void)
 static void bt_chess_invite_accepted(ChessColor local_color)
 {
     ESP_LOGI(TAG, "Bluetooth invite accepted, local color: %d", local_color);
-    chess_ui_switch_screen(SCREEN_GAME);
+    // Request screen switch from UI update task
+    s_requested_screen = SCREEN_GAME;
+    s_screen_switch_requested = true;
 }
 
 static void bt_chess_move_received(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion)
 {
     ESP_LOGI(TAG, "Bluetooth move: %d,%d -> %d,%d", from_x, from_y, to_x, to_y);
-    // Apply the opponent's move
-    chess_ui_apply_opponent_move(from_x, from_y, to_x, to_y, promotion);
+    // Queue the move for processing in UI update task
+    s_move_from_x = from_x;
+    s_move_from_y = from_y;
+    s_move_to_x = to_x;
+    s_move_to_y = to_y;
+    s_move_promotion = promotion;
+    s_move_pending = true;
 }
 
 static void bt_chess_game_over(ChessColor winner)
 {
     ESP_LOGI(TAG, "Bluetooth game over, winner: %d", winner);
-    chess_ui_render();
+    s_render_requested = true;
 }
 
 void app_main(void)
