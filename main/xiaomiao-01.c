@@ -245,11 +245,10 @@ static void bt_chess_connected(void)
 
 static void bt_chess_disconnected(void)
 {
-    ESP_LOGI(TAG, "Bluetooth disconnected");
-    // Request screen switch from UI update task
-    s_requested_screen = SCREEN_BLUETOOTH_MENU;
-    s_screen_switch_requested = true;
-    s_render_requested = true;  // Also request render after switching
+    ESP_LOGI(TAG, "Bluetooth disconnected - staying in game, waiting for reconnection");
+    // Don't exit the game - just stay in game screen and show disconnected status
+    // The UI will show red status indicator
+    s_render_requested = true;
 }
 
 static void bt_chess_invite_received(void)

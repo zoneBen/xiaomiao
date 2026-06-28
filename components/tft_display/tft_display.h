@@ -13,6 +13,10 @@ extern "C" {
 #define TFT_WIDTH 160
 #define TFT_HEIGHT 128
 
+// Helper macro to check if a string contains Chinese characters
+#define IS_CN_CHAR(c) ((uint8_t)(c) >= 0x80)
+
+
 // Color definitions (RGB565)
 #define TFT_BLACK       0x0000
 #define TFT_NAVY        0x000F
@@ -42,10 +46,12 @@ extern "C" {
 // Chess board colors
 #define COLOR_LIGHT_SQUARE RGB_TO_RGB565(0x8B, 0x73, 0x55)  // Darker beige
 #define COLOR_DARK_SQUARE  RGB_TO_RGB565(0x3D, 0x23, 0x0A)  // Very dark brown
+#define COLOR_BOARD_BG     RGB_TO_RGB565(0x2A, 0x2A, 0x2A)  // Dark gray board background
 #define COLOR_WHITE_PIECE  TFT_WHITE
 #define COLOR_BLACK_PIECE  TFT_BLACK
 #define COLOR_CURSOR       0x07FF    // Cyan for cursor
 #define COLOR_SELECTED     0x07E0    // Green for selected
+#define COLOR_LAST_MOVE    RGB_TO_RGB565(0x40, 0xA0, 0x40)  // Green highlight for last move
 #define COLOR_BACKGROUND   TFT_BLACK
 #define COLOR_DIALOG       RGB_TO_RGB565(0x1A, 0x1A, 0x1A)  // Dark gray dialog
 #define COLOR_TEXT         TFT_WHITE

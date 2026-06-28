@@ -10,7 +10,8 @@ typedef enum {
     SCREEN_BLUETOOTH_MENU,
     SCREEN_BLUETOOTH_SCAN,
     SCREEN_BLUETOOTH_WAITING,
-    SCREEN_GAME
+    SCREEN_GAME,
+    SCREEN_EXIT_CONFIRM
 } ChessScreen;
 
 // Key codes
