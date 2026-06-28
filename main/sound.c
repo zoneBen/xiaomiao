@@ -33,9 +33,6 @@ typedef struct {
 // Sound state
 static bool s_initialized = false;
 static bool s_effects_enabled = true;
-static bool s_music_playing = false;
-static uint8_t s_music_volume = 50;  // 0-100
-static TaskHandle_t s_music_task = NULL;
 static TaskHandle_t s_effects_task = NULL;
 static QueueHandle_t s_sound_queue = NULL;
 
@@ -44,19 +41,6 @@ typedef struct {
     uint32_t frequency;
     uint32_t duration_ms;
 } Note;
-
-// Simple melody for background music (a cheerful tune)
-static const Note bg_melody[] = {
-    {NOTE_E4, 200}, {NOTE_G4, 200}, {NOTE_A4, 300},
-    {NOTE_G4, 100}, {NOTE_E4, 200}, {NOTE_D4, 200},
-    {NOTE_E4, 400},
-    {NOTE_D4, 200}, {NOTE_F4, 200}, {NOTE_A4, 300},
-    {NOTE_F4, 100}, {NOTE_D4, 200}, {NOTE_C4, 200},
-    {NOTE_D4, 400},
-    {0, 200},  // Pause
-};
-
-static const int bg_melody_len = sizeof(bg_melody) / sizeof(bg_melody[0]);
 
 // Sound effect patterns
 static const Note effect_key_click[] = {{NOTE_A5, 50}};
@@ -125,26 +109,6 @@ static void queue_sequence(const Note* notes, int count, uint8_t volume)
     }
 }
 
-static void background_music_task(void* arg)
-{
-    ESP_LOGI(TAG, "Background music task started");
-
-    while (s_music_playing) {
-        for (int i = 0; i < bg_melody_len && s_music_playing; i++) {
-            play_note_internal(bg_melody[i].frequency, bg_melody[i].duration_ms, s_music_volume);
-            if (s_music_playing && i < bg_melody_len - 1) {
-                vTaskDelay(pdMS_TO_TICKS(30));
-            }
-        }
-        if (s_music_playing) {
-            vTaskDelay(pdMS_TO_TICKS(1000));  // Pause between repeats
-        }
-    }
-
-    ESP_LOGI(TAG, "Background music task stopped");
-    s_music_task = NULL;
-    vTaskDelete(NULL);
-}
 
 void sound_init(void)
 {
@@ -223,40 +187,13 @@ void sound_play_tone(uint32_t frequency, uint32_t duration_ms)
     queue_note(frequency, duration_ms, 50);
 }
 
-void sound_start_background_music(void)
-{
-    if (!s_initialized) return;
-    if (s_music_playing) return;
-
-    // Stop any ongoing effects
-    if (s_sound_queue) {
-        xQueueReset(s_sound_queue);
-    }
-    set_buzzer_duty(0);
-
-    s_music_playing = true;
-    xTaskCreate(background_music_task, "BgMusic", 2048, NULL, 3, &s_music_task);
-    ESP_LOGI(TAG, "Background music started");
-}
-
-void sound_stop_background_music(void)
-{
-    if (!s_music_playing) return;
-
-    s_music_playing = false;
-    set_buzzer_duty(0);
-    ESP_LOGI(TAG, "Background music stopped");
-}
-
-void sound_set_music_volume(uint8_t volume)
-{
-    if (volume > 100) volume = 100;
-    s_music_volume = volume;
-    ESP_LOGI(TAG, "Music volume set to %d", volume);
-}
-
 void sound_set_effects_enabled(bool enabled)
 {
     s_effects_enabled = enabled;
     ESP_LOGI(TAG, "Sound effects %s", enabled ? "enabled" : "disabled");
+}
+
+bool sound_get_effects_enabled(void)
+{
+    return s_effects_enabled;
 }

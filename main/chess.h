@@ -64,6 +64,11 @@ bool chess_game_make_move(ChessGame* game, int from_x, int from_y, int to_x, int
 ChessPiece chess_game_get_piece(ChessGame* game, int x, int y);
 ChessColor chess_game_get_current_turn(ChessGame* game);
 bool chess_game_is_game_over(ChessGame* game);
+ChessColor chess_game_get_winner(ChessGame* game);
+bool chess_game_is_in_check(ChessGame* game, ChessColor color);
+bool chess_game_is_checkmate(ChessGame* game, ChessColor color);
+bool chess_game_is_stalemate(ChessGame* game, ChessColor color);
 bool chess_game_get_valid_moves(ChessGame* game, int x, int y, ChessMove* moves, size_t max_moves);
+bool chess_game_has_any_valid_moves(ChessGame* game, ChessColor color);
 
 #endif

@@ -52,14 +52,10 @@ void sound_play(SoundType sound);
 // Play a single tone
 void sound_play_tone(uint32_t frequency, uint32_t duration_ms);
 
-// Start/stop background music
-void sound_start_background_music(void);
-void sound_stop_background_music(void);
-
-// Set background music volume (0-100)
-void sound_set_music_volume(uint8_t volume);
-
-// Enable/disable sound effects
+// Enable/disable sound effects (including key sounds)
 void sound_set_effects_enabled(bool enabled);
+
+// Get whether sound effects are enabled
+bool sound_get_effects_enabled(void);
 
 #endif

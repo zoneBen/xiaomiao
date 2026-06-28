@@ -58,7 +58,7 @@ typedef struct {
     int message_timer;
 
     // Sound settings
-    bool music_enabled;
+    bool sound_enabled;
 
     // Screen buffer
     TFT_Sprite sprite;
@@ -75,7 +75,7 @@ static ChessGame* g_game = NULL;
 static const char* main_menu_items[] = {
     "Local Game",
     "Network Game",
-    "Music: Off"
+    "Sound: Off"
 };
 
 // Menu items for lobby
@@ -120,7 +120,8 @@ void chess_ui_init(void)
     g_ui->input_field = 0;
     g_ui->input_pos = 0;
     g_ui->searching = false;
-    g_ui->music_enabled = false;
+    g_ui->sound_enabled = true;
+    sound_set_effects_enabled(true);
 
     // Default WiFi/MQTT settings
     strcpy(g_ui->mqtt_uri, "mqtt://broker.hivemq.com");
@@ -200,6 +201,26 @@ void chess_ui_set_network_status(const char* status)
     }
 }
 
+// Internal versions - assume lock is already held
+static void chess_ui_show_invite_dialog_internal(const char* opponent_id)
+{
+    if (!g_ui || !opponent_id) return;
+
+    strncpy(g_ui->invite_opponent, opponent_id, sizeof(g_ui->invite_opponent) - 1);
+    g_ui->invite_opponent[sizeof(g_ui->invite_opponent) - 1] = '\0';
+    g_ui->show_invite = true;
+    g_ui->menu_index = 0;
+    chess_ui_render_internal();
+}
+
+static void chess_ui_hide_invite_dialog_internal(void)
+{
+    if (g_ui) {
+        g_ui->show_invite = false;
+        chess_ui_render_internal();
+    }
+}
+
 void chess_ui_show_invite_dialog(const char* opponent_id)
 {
     if (!g_ui || !opponent_id) return;
@@ -207,11 +228,7 @@ void chess_ui_show_invite_dialog(const char* opponent_id)
     ESP_LOGI(TAG, "Showing invite from %s", opponent_id);
 
     ui_lock_acquire();
-    strncpy(g_ui->invite_opponent, opponent_id, sizeof(g_ui->invite_opponent) - 1);
-    g_ui->invite_opponent[sizeof(g_ui->invite_opponent) - 1] = '\0';
-    g_ui->show_invite = true;
-    g_ui->menu_index = 0;
-    chess_ui_render_internal();
+    chess_ui_show_invite_dialog_internal(opponent_id);
     ui_lock_release();
 }
 
@@ -219,10 +236,21 @@ void chess_ui_hide_invite_dialog(void)
 {
     if (g_ui) {
         ui_lock_acquire();
-        g_ui->show_invite = false;
-        chess_ui_render_internal();
+        chess_ui_hide_invite_dialog_internal();
         ui_lock_release();
     }
+}
+
+// Internal version - assumes lock is already held
+static void chess_ui_show_message_internal(const char* message, int duration_ms)
+{
+    if (!g_ui || !message) return;
+
+    strncpy(g_ui->message_text, message, sizeof(g_ui->message_text) - 1);
+    g_ui->message_text[sizeof(g_ui->message_text) - 1] = '\0';
+    g_ui->show_message = true;
+    g_ui->message_timer = duration_ms / 100;  // Convert to 100ms ticks
+    chess_ui_render_internal();
 }
 
 void chess_ui_show_message(const char* message, int duration_ms)
@@ -230,11 +258,7 @@ void chess_ui_show_message(const char* message, int duration_ms)
     if (!g_ui || !message) return;
 
     ui_lock_acquire();
-    strncpy(g_ui->message_text, message, sizeof(g_ui->message_text) - 1);
-    g_ui->message_text[sizeof(g_ui->message_text) - 1] = '\0';
-    g_ui->show_message = true;
-    g_ui->message_timer = duration_ms / 100;  // Convert to 100ms ticks
-    chess_ui_render_internal();
+    chess_ui_show_message_internal(message, duration_ms);
     ui_lock_release();
 }
 
@@ -249,8 +273,10 @@ void chess_ui_handle_key(KeyCode key)
     // Handle invite dialog first
     if (g_ui->show_invite) {
         if (key == KEY_LEFT || key == KEY_RIGHT) {
+            sound_play(SOUND_KEY_CLICK);
             g_ui->menu_index = (g_ui->menu_index == 0) ? 1 : 0;
         } else if (key == KEY_A) {
+            sound_play(SOUND_MENU_SELECT);
             if (g_ui->menu_index == 0) {
                 chess_network_accept_invite(g_ui->invite_opponent);
                 chess_ui_switch_screen(SCREEN_GAME);
@@ -259,6 +285,7 @@ void chess_ui_handle_key(KeyCode key)
             }
             g_ui->show_invite = false;
         } else if (key == KEY_B) {
+            sound_play(SOUND_KEY_CLICK);
             g_ui->show_invite = false;
         }
         chess_ui_render_internal();
@@ -269,9 +296,15 @@ void chess_ui_handle_key(KeyCode key)
     switch (g_ui->current_screen) {
         case SCREEN_MAIN_MENU:
             if (key == KEY_UP) {
-                if (g_ui->menu_index > 0) g_ui->menu_index--;
+                if (g_ui->menu_index > 0) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->menu_index--;
+                }
             } else if (key == KEY_DOWN) {
-                if (g_ui->menu_index < g_ui->menu_count - 1) g_ui->menu_index++;
+                if (g_ui->menu_index < g_ui->menu_count - 1) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->menu_index++;
+                }
             } else if (key == KEY_A) {
                 if (g_ui->menu_index == 0) {
                     sound_play(SOUND_GAME_START);
@@ -280,24 +313,31 @@ void chess_ui_handle_key(KeyCode key)
                     sound_play(SOUND_MENU_SELECT);
                     chess_ui_switch_screen(SCREEN_NETWORK_SETUP);
                 } else if (g_ui->menu_index == 2) {
-                    // Toggle music
-                    g_ui->music_enabled = !g_ui->music_enabled;
-                    if (g_ui->music_enabled) {
-                        sound_start_background_music();
+                    // Toggle sound effects
+                    g_ui->sound_enabled = !g_ui->sound_enabled;
+                    sound_set_effects_enabled(g_ui->sound_enabled);
+                    if (g_ui->sound_enabled) {
                         sound_play(SOUND_MENU_SELECT);
-                    } else {
-                        sound_stop_background_music();
                     }
                 }
+            } else if (key == KEY_B) {
+                sound_play(SOUND_KEY_CLICK);
             }
             break;
 
         case SCREEN_NETWORK_SETUP:
             if (key == KEY_UP) {
-                if (g_ui->menu_index > 0) g_ui->menu_index--;
+                if (g_ui->menu_index > 0) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->menu_index--;
+                }
             } else if (key == KEY_DOWN) {
-                if (g_ui->menu_index < 5) g_ui->menu_index++;
+                if (g_ui->menu_index < 5) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->menu_index++;
+                }
             } else if (key == KEY_A) {
+                sound_play(SOUND_MENU_SELECT);
                 if (g_ui->menu_index == 3) {
                     // Connect
                     if (strlen(g_ui->ssid) > 0) {
@@ -317,6 +357,7 @@ void chess_ui_handle_key(KeyCode key)
                     }
                 }
             } else if (key == KEY_B) {
+                sound_play(SOUND_KEY_CLICK);
                 // Back
                 if (network_is_connected()) {
                     chess_ui_switch_screen(SCREEN_LOBBY);
@@ -328,10 +369,17 @@ void chess_ui_handle_key(KeyCode key)
 
         case SCREEN_LOBBY:
             if (key == KEY_UP) {
-                if (g_ui->menu_index > 0) g_ui->menu_index--;
+                if (g_ui->menu_index > 0) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->menu_index--;
+                }
             } else if (key == KEY_DOWN) {
-                if (g_ui->menu_index < g_ui->menu_count - 1) g_ui->menu_index++;
+                if (g_ui->menu_index < g_ui->menu_count - 1) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->menu_index++;
+                }
             } else if (key == KEY_A) {
+                sound_play(SOUND_MENU_SELECT);
                 if (g_ui->menu_index == 0) {
                     // Search opponent
                     if (chess_network_start_search()) {
@@ -347,26 +395,54 @@ void chess_ui_handle_key(KeyCode key)
                     chess_ui_switch_screen(SCREEN_NETWORK_SETUP);
                 }
             } else if (key == KEY_B) {
+                sound_play(SOUND_KEY_CLICK);
                 chess_network_stop_search();
                 chess_ui_switch_screen(SCREEN_NETWORK_SETUP);
             }
             break;
 
         case SCREEN_GAME:
+            // If game is over, only handle B key to go back to menu
+            if (chess_game_is_game_over(g_game)) {
+                if (key == KEY_B) {
+                    sound_play(SOUND_KEY_CLICK);
+                    chess_ui_switch_screen(SCREEN_MAIN_MENU);
+                } else if (key == KEY_A) {
+                    // Optionally, allow A key to also go back to menu for convenience
+                    sound_play(SOUND_KEY_CLICK);
+                    chess_ui_switch_screen(SCREEN_MAIN_MENU);
+                }
+                break;
+            }
+
+            // Normal game handling when game is not over
             if (key == KEY_UP) {
-                if (g_ui->cursor_y > 0) g_ui->cursor_y--;
+                if (g_ui->cursor_y > 0) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->cursor_y--;
+                }
             } else if (key == KEY_DOWN) {
-                if (g_ui->cursor_y < 7) g_ui->cursor_y++;
+                if (g_ui->cursor_y < 7) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->cursor_y++;
+                }
             } else if (key == KEY_LEFT) {
-                if (g_ui->cursor_x > 0) g_ui->cursor_x--;
+                if (g_ui->cursor_x > 0) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->cursor_x--;
+                }
             } else if (key == KEY_RIGHT) {
-                if (g_ui->cursor_x < 7) g_ui->cursor_x++;
+                if (g_ui->cursor_x < 7) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->cursor_x++;
+                }
             } else if (key == KEY_A) {
                 ChessPiece piece = chess_game_get_piece(g_game, g_ui->cursor_x, g_ui->cursor_y);
 
                 if (g_ui->has_selection) {
                     if (g_ui->selected_x == g_ui->cursor_x && g_ui->selected_y == g_ui->cursor_y) {
                         // Deselect
+                        sound_play(SOUND_KEY_CLICK);
                         g_ui->has_selection = false;
                         g_ui->selected_x = -1;
                         g_ui->selected_y = -1;
@@ -384,12 +460,25 @@ void chess_ui_handle_key(KeyCode key)
                             } else {
                                 sound_play(SOUND_MOVE);
                             }
+
+                            // Check for game over
+                            if (chess_game_is_game_over(g_game)) {
+                                ChessColor winner = chess_game_get_winner(g_game);
+                                if (winner == COLOR_WHITE) {
+                                    chess_ui_show_message_internal("White captured king!", 3000);
+                                    sound_play(SOUND_CHECKMATE);
+                                } else if (winner == COLOR_BLACK) {
+                                    chess_ui_show_message_internal("Black captured king!", 3000);
+                                    sound_play(SOUND_CHECKMATE);
+                                }
+                            }
+
                             if (chess_network_get_state() == CHESS_NET_STATE_PLAYING) {
                                 chess_network_send_move(g_ui->selected_x, g_ui->selected_y,
                                                         g_ui->cursor_x, g_ui->cursor_y, PIECE_QUEEN);
                             }
                         } else {
-                            sound_play(SOUND_MOVE);
+                            sound_play(SOUND_INVALID_MOVE);
                         }
                         g_ui->has_selection = false;
                         g_ui->selected_x = -1;
@@ -397,6 +486,7 @@ void chess_ui_handle_key(KeyCode key)
                     } else if (piece.type != PIECE_NONE &&
                                piece.color == chess_game_get_current_turn(g_game)) {
                         // Select different piece
+                        sound_play(SOUND_MENU_SELECT);
                         g_ui->selected_x = g_ui->cursor_x;
                         g_ui->selected_y = g_ui->cursor_y;
                     } else {
@@ -410,6 +500,7 @@ void chess_ui_handle_key(KeyCode key)
                     if (piece.type != PIECE_NONE &&
                         piece.color == chess_game_get_current_turn(g_game)) {
                         // Select piece
+                        sound_play(SOUND_MENU_SELECT);
                         g_ui->selected_x = g_ui->cursor_x;
                         g_ui->selected_y = g_ui->cursor_y;
                         g_ui->has_selection = true;
@@ -422,6 +513,7 @@ void chess_ui_handle_key(KeyCode key)
                     }
                 }
             } else if (key == KEY_B) {
+                sound_play(SOUND_KEY_CLICK);
                 if (g_ui->has_selection) {
                     g_ui->has_selection = false;
                     g_ui->selected_x = -1;
@@ -535,8 +627,8 @@ static void render_main_menu(void)
         int text_x = 25;
         const char* text = main_menu_items[i];
         if (i == 2) {
-            // Dynamic music option text
-            text = g_ui->music_enabled ? "Music: On " : "Music: Off";
+            // Dynamic sound option text
+            text = g_ui->sound_enabled ? "Sound: On " : "Sound: Off";
         }
         while (*text) {
             tft_sprite_draw_char(&g_ui->sprite, text_x, y + 6, *text, is_selected ? TFT_YELLOW : TFT_WHITE, 1);
@@ -760,6 +852,18 @@ static void render_game(void)
     tft_sprite_fill_rect(&g_ui->sprite, sidebar_x + 8, 8, 16, 16, (turn == COLOR_WHITE) ? TFT_WHITE : TFT_BLACK);
     tft_sprite_draw_rect(&g_ui->sprite, sidebar_x + 8, 8, 16, 16, TFT_LIGHTGREY);
 
+    // Check indicator
+    if (chess_game_is_in_check(g_game, turn)) {
+        int check_x = sidebar_x + 8;
+        int check_y = 24;
+        const char* check_text = "+";
+        while (*check_text) {
+            tft_sprite_draw_char(&g_ui->sprite, check_x, check_y, *check_text, TFT_RED, 1);
+            check_x += 6;
+            check_text++;
+        }
+    }
+
     // Captured pieces area (simplified)
     tft_sprite_fill_rect(&g_ui->sprite, sidebar_x, 32, 32, 64, COLOR_BACKGROUND);
 
@@ -772,6 +876,45 @@ static void render_game(void)
         tft_sprite_draw_char(&g_ui->sprite, text_x, 100, *text, TFT_LIGHTGREY, 1);
         text_x += 6;
         text++;
+    }
+
+    // Game over overlay
+    if (chess_game_is_game_over(g_game)) {
+        // Dim background
+        for (int x = 0; x < TFT_WIDTH; x++) {
+            for (int y = 0; y < TFT_HEIGHT; y++) {
+                // Simple dimming by drawing semi-transparent overlay
+                // Since we don't have alpha, just draw a dark box
+            }
+        }
+
+        // Draw game over dialog
+        tft_sprite_fill_rect(&g_ui->sprite, 10, 40, 140, 50, COLOR_DIALOG);
+        tft_sprite_draw_rect(&g_ui->sprite, 10, 40, 140, 50, TFT_WHITE);
+
+        // Game over text
+        ChessColor winner = chess_game_get_winner(g_game);
+        const char* title_text = (winner == COLOR_WHITE) ? "White Captured King!" :
+                                 (winner == COLOR_BLACK) ? "Black Captured King!" : "";
+        int title_x = (TFT_WIDTH - tft_sprite_text_width(title_text, 1)) / 2;
+        text_x = title_x;
+        text = title_text;
+        while (*text) {
+            tft_sprite_draw_char(&g_ui->sprite, text_x, 55, *text, TFT_WHITE, 1);
+            text_x += 6;
+            text++;
+        }
+
+        // Press B to continue
+        const char* hint_text = "B: Menu";
+        int hint_x = (TFT_WIDTH - tft_sprite_text_width(hint_text, 1)) / 2;
+        text_x = hint_x;
+        text = hint_text;
+        while (*text) {
+            tft_sprite_draw_char(&g_ui->sprite, text_x, 75, *text, TFT_LIGHTGREY, 1);
+            text_x += 6;
+            text++;
+        }
     }
 }
 
