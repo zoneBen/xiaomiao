@@ -238,25 +238,34 @@ void chess_ui_switch_screen(ChessScreen screen)
             g_ui->menu_count = 0;
             break;
         case SCREEN_GAME:
-            chess_game_reset(g_game);
-            g_ui->cursor_x = 0;
-            g_ui->cursor_y = 0;
-            g_ui->selected_x = -1;
-            g_ui->selected_y = -1;
-            g_ui->has_selection = false;
+            // 只有当不是从重连状态回来时才重置棋盘
+            BluetoothChessState bt_state = bt_chess_get_state();
+            bool was_reconnecting = (bt_state == BT_CHESS_STATE_GAME_READY ||
+                                     bt_state == BT_CHESS_STATE_PLAYING ||
+                                     bt_state == BT_CHESS_STATE_RECONNECTING);
 
-            // Reset last move, scores and timers
-            g_ui->last_move_from_x = -1;
-            g_ui->last_move_from_y = -1;
-            g_ui->last_move_to_x = -1;
-            g_ui->last_move_to_y = -1;
-            g_ui->has_last_move = false;
-            g_ui->white_material = 0;
-            g_ui->black_material = 0;
-            g_ui->white_elapsed_us = 0;
-            g_ui->black_elapsed_us = 0;
-            g_ui->current_turn_tracked = COLOR_WHITE;
-            g_ui->turn_start_time = esp_timer_get_time();
+            if (!was_reconnecting) {
+                // 新游戏才重置
+                chess_game_reset(g_game);
+                g_ui->cursor_x = 0;
+                g_ui->cursor_y = 0;
+                g_ui->selected_x = -1;
+                g_ui->selected_y = -1;
+                g_ui->has_selection = false;
+
+                // Reset last move, scores and timers
+                g_ui->last_move_from_x = -1;
+                g_ui->last_move_from_y = -1;
+                g_ui->last_move_to_x = -1;
+                g_ui->last_move_to_y = -1;
+                g_ui->has_last_move = false;
+                g_ui->white_material = 0;
+                g_ui->black_material = 0;
+                g_ui->white_elapsed_us = 0;
+                g_ui->black_elapsed_us = 0;
+                g_ui->current_turn_tracked = COLOR_WHITE;
+                g_ui->turn_start_time = esp_timer_get_time();
+            }
             break;
         case SCREEN_EXIT_CONFIRM:
             g_ui->menu_count = 2;
@@ -282,6 +291,10 @@ void chess_ui_apply_opponent_move_locked(int from_x, int from_y, int to_x, int t
 
     // Apply the move
     if (chess_game_make_move(g_game, from_x, from_y, to_x, to_y, promotion)) {
+        // 保存游戏状态用于同步
+        if (bt_chess_get_state() >= BT_CHESS_STATE_GAME_READY) {
+            bt_chess_save_game_state(g_game);
+        }
         // Track the last move for highlighting
         g_ui->last_move_from_x = from_x;
         g_ui->last_move_from_y = from_y;
@@ -328,12 +341,42 @@ void chess_ui_apply_opponent_move(int from_x, int from_y, int to_x, int to_y, Ch
     ui_lock_release();
 }
 
+// Internal version - assumes lock is already held
+void chess_ui_update_game_locked(const ChessGame* game)
+{
+    if (game && g_game) {
+        memcpy(g_game, game, sizeof(ChessGame));
+
+        // 更新 UI 的回合跟踪
+        g_ui->current_turn_tracked = g_game->current_turn;
+        g_ui->turn_start_time = esp_timer_get_time();
+
+        // 重新计算 material score
+        g_ui->white_material = 0;
+        g_ui->black_material = 0;
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                ChessPiece piece = g_game->board[y][x];
+                if (piece.type != PIECE_NONE) {
+                    int value = get_piece_value(piece.type);
+                    if (piece.color == COLOR_WHITE) {
+                        g_ui->white_material += value;
+                    } else {
+                        g_ui->black_material += value;
+                    }
+                }
+            }
+        }
+
+        chess_ui_render_locked();
+    }
+}
+
 void chess_ui_update_game(const ChessGame* game)
 {
     if (game && g_game) {
         ui_lock_acquire();
-        memcpy(g_game, game, sizeof(ChessGame));
-        chess_ui_render_locked();
+        chess_ui_update_game_locked(game);
         ui_lock_release();
     }
 }
@@ -366,7 +409,9 @@ void chess_ui_handle_key(KeyCode key)
 
     ESP_LOGI(TAG, "Handling key %d on screen %d", key, g_ui->current_screen);
 
+    ESP_LOGI(TAG, "Acquiring ui_lock...");
     ui_lock_acquire();
+    ESP_LOGI(TAG, "ui_lock acquired");
 
     switch (g_ui->current_screen) {
         case SCREEN_MAIN_MENU:
@@ -509,8 +554,10 @@ void chess_ui_handle_key(KeyCode key)
             break;
 
         case SCREEN_GAME:
+            ESP_LOGI(TAG, "Processing game screen key...");
             // If game is over, only handle B key to go back to menu
             if (chess_game_is_game_over(g_game)) {
+                ESP_LOGI(TAG, "Game is over");
                 if (key == KEY_B) {
                     sound_play(SOUND_KEY_CLICK);
                     chess_ui_switch_screen(SCREEN_MAIN_MENU);
@@ -522,12 +569,38 @@ void chess_ui_handle_key(KeyCode key)
                 break;
             }
 
-            // Check if it's our turn in bluetooth game
-            bool is_bluetooth_game = (bt_chess_get_state() == BT_CHESS_STATE_GAME_READY ||
-                                     bt_chess_get_state() == BT_CHESS_STATE_PLAYING);
+            ESP_LOGI(TAG, "Getting bluetooth state...");
+            // Get bluetooth state first (these are simple variable reads, thread-safe)
+            BluetoothChessState bt_state = bt_chess_get_state();
+            ESP_LOGI(TAG, "BT state: %d", bt_state);
+            bool is_bluetooth_game = (bt_state == BT_CHESS_STATE_GAME_READY ||
+                                     bt_state == BT_CHESS_STATE_PLAYING);
+            bool is_reconnecting = (bt_state == BT_CHESS_STATE_RECONNECTING);
             bool is_our_turn = true;
             if (is_bluetooth_game) {
+                ESP_LOGI(TAG, "Checking if it's our turn...");
                 is_our_turn = bt_chess_is_my_turn();
+                ESP_LOGI(TAG, "Our turn: %d", is_our_turn);
+            }
+
+            // In reconnecting state, only handle A and B keys
+            if (is_reconnecting) {
+                if (key == KEY_A) {
+                    // Try manual reconnect
+                    if (bt_chess_try_reconnect()) {
+                        sound_play(SOUND_KEY_CLICK);
+                        chess_ui_show_message_internal("Reconnecting...", 2000);
+                    } else {
+                        sound_play(SOUND_INVALID_MOVE);
+                        chess_ui_show_message_internal("Reconnect failed", 2000);
+                    }
+                } else if (key == KEY_B) {
+                    sound_play(SOUND_KEY_CLICK);
+                    // Cancel reconnection and go back to main menu
+                    bt_chess_disconnect();
+                    chess_ui_switch_screen(SCREEN_MAIN_MENU);
+                }
+                break;
             }
 
             // Normal game handling when game is not over
@@ -552,10 +625,13 @@ void chess_ui_handle_key(KeyCode key)
                     g_ui->cursor_x++;
                 }
             } else if (key == KEY_A) {
+                ESP_LOGI(TAG, "KEY_A pressed in game screen");
                 ChessPiece piece = chess_game_get_piece(g_game, g_ui->cursor_x, g_ui->cursor_y);
+                ESP_LOGI(TAG, "Piece at cursor: type=%d, color=%d", piece.type, piece.color);
 
                 // Only allow moves if it's our turn
                 if (!is_our_turn && is_bluetooth_game) {
+                    ESP_LOGI(TAG, "Not our turn, showing message");
                     sound_play(SOUND_INVALID_MOVE);
                     chess_ui_show_message_internal("Not your turn!", 1000);
                     break;
@@ -627,6 +703,8 @@ void chess_ui_handle_key(KeyCode key)
                             }
 
                             if (is_bluetooth_game) {
+                                // 保存游戏状态用于同步
+                                bt_chess_save_game_state(g_game);
                                 bt_chess_send_move(g_ui->selected_x, g_ui->selected_y,
                                                    g_ui->cursor_x, g_ui->cursor_y, PIECE_QUEEN);
                             }
@@ -671,7 +749,13 @@ void chess_ui_handle_key(KeyCode key)
                 }
             } else if (key == KEY_B) {
                 sound_play(SOUND_KEY_CLICK);
-                if (g_ui->has_selection) {
+                // Check if we're in reconnecting state - allow cancel
+                BluetoothChessState bt_state = bt_chess_get_state();
+                if (bt_state == BT_CHESS_STATE_RECONNECTING) {
+                    // Cancel reconnection and go back to main menu
+                    bt_chess_disconnect();
+                    chess_ui_switch_screen(SCREEN_MAIN_MENU);
+                } else if (g_ui->has_selection) {
                     g_ui->has_selection = false;
                     g_ui->selected_x = -1;
                     g_ui->selected_y = -1;
@@ -1070,8 +1154,9 @@ static void render_game(void)
 
     // Bluetooth connection status indicator (top-right corner)
     BluetoothChessState bt_state = bt_chess_get_state();
-    bool is_bluetooth_connected = (bt_state >= BT_CHESS_STATE_CONNECTED);
-    uint16_t bt_status_color = is_bluetooth_connected ? TFT_GREEN : TFT_RED;
+    bool is_bluetooth_connected = (bt_state >= BT_CHESS_STATE_CONNECTED && bt_state != BT_CHESS_STATE_RECONNECTING);
+    uint16_t bt_status_color = (bt_state == BT_CHESS_STATE_RECONNECTING) ? TFT_YELLOW :
+                               (is_bluetooth_connected ? TFT_GREEN : TFT_RED);
     tft_sprite_fill_rect(&g_ui->sprite, sidebar_x + 20, 2, 10, 10, bt_status_color);
 
     // Turn indicator
@@ -1218,6 +1303,51 @@ static void render_game(void)
         tft_sprite_draw_char(&g_ui->sprite, text_x, 118, text[i], TFT_LIGHTGREY, 1);
         text_x += 6;
         i++;
+    }
+
+    // Reconnection status overlay
+    BluetoothChessState bt_state_now = bt_chess_get_state();
+    if (bt_state_now == BT_CHESS_STATE_RECONNECTING) {
+        // Draw reconnecting dialog
+        tft_sprite_fill_rect(&g_ui->sprite, 10, 20, 140, 65, COLOR_DIALOG);
+        tft_sprite_draw_rect(&g_ui->sprite, 10, 20, 140, 65, TFT_YELLOW);
+
+        // Reconnecting text
+        const char* recon_title = "Connection Lost!";
+        int recon_title_x = (TFT_WIDTH - tft_sprite_text_width(recon_title, 1)) / 2;
+        text_x = recon_title_x;
+        text = recon_title;
+        while (*text) {
+            tft_sprite_draw_char(&g_ui->sprite, text_x, 35, *text, TFT_YELLOW, 1);
+            text_x += 6;
+            text++;
+        }
+
+        // 根据角色显示不同提示
+        const char* recon_hint;
+        if (bt_chess_get_role() == BT_CHESS_ROLE_HOST) {
+            recon_hint = "Waiting for guest";
+        } else {
+            recon_hint = "Press A to retry";
+        }
+        int recon_hint_x = (TFT_WIDTH - tft_sprite_text_width(recon_hint, 1)) / 2;
+        text_x = recon_hint_x;
+        text = recon_hint;
+        while (*text) {
+            tft_sprite_draw_char(&g_ui->sprite, text_x, 50, *text, TFT_LIGHTGREY, 1);
+            text_x += 6;
+            text++;
+        }
+
+        const char* cancel_hint = "Press B to exit";
+        int cancel_hint_x = (TFT_WIDTH - tft_sprite_text_width(cancel_hint, 1)) / 2;
+        text_x = cancel_hint_x;
+        text = cancel_hint;
+        while (*text) {
+            tft_sprite_draw_char(&g_ui->sprite, text_x, 65, *text, TFT_LIGHTGREY, 1);
+            text_x += 6;
+            text++;
+        }
     }
 
     // Game over overlay

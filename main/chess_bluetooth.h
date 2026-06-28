@@ -19,11 +19,25 @@ typedef enum {
     BT_CHESS_MSG_ACCEPT = 3,
     BT_CHESS_MSG_REJECT = 4,
     BT_CHESS_MSG_MOVE = 5,
-    BT_CHESS_MSG_SYNC = 6,
-    BT_CHESS_MSG_GAME_OVER = 7,
-    BT_CHESS_MSG_RESIGN = 8,
-    BT_CHESS_MSG_CHAT = 9
+    BT_CHESS_MSG_MOVE_ACK = 6,      // 移动确认
+    BT_CHESS_MSG_SYNC = 7,
+    BT_CHESS_MSG_SYNC_REQUEST = 8,  // 请求同步棋盘
+    BT_CHESS_MSG_GAME_OVER = 9,
+    BT_CHESS_MSG_RESIGN = 10,
+    BT_CHESS_MSG_CHAT = 11
 } BluetoothChessMessageType;
+
+// 未确认的移动记录
+#define MAX_PENDING_MOVES 10
+typedef struct {
+    int from_x;
+    int from_y;
+    int to_x;
+    int to_y;
+    ChessPieceType promotion;
+    uint32_t sequence_num;          // 序列号
+    bool acknowledged;
+} PendingMove;
 
 // Bluetooth connection state
 typedef enum {
@@ -34,7 +48,8 @@ typedef enum {
     BT_CHESS_STATE_CONNECTED,
     BT_CHESS_STATE_GAME_READY,
     BT_CHESS_STATE_PLAYING,
-    BT_CHESS_STATE_GAME_OVER
+    BT_CHESS_STATE_GAME_OVER,
+    BT_CHESS_STATE_RECONNECTING     // Trying to reconnect after disconnection
 } BluetoothChessState;
 
 // Role in the Bluetooth connection
@@ -62,6 +77,7 @@ typedef void (*bt_chess_invite_accepted_callback_t)(ChessColor local_color);
 typedef void (*bt_chess_move_received_callback_t)(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion);
 typedef void (*bt_chess_game_over_callback_t)(ChessColor winner);
 typedef void (*bt_chess_chat_received_callback_t)(const char* message);
+typedef void (*bt_chess_sync_received_callback_t)(const ChessGame* game);
 
 // Initialize Bluetooth chess module
 void bt_chess_init(void);
@@ -138,6 +154,30 @@ bool bt_chess_send_game_over(ChessColor winner);
 // Disconnect current connection
 void bt_chess_disconnect(void);
 
+// Try to reconnect to last paired device (only after game was in progress)
+bool bt_chess_try_reconnect(void);
+
+// Get whether we were in a game before disconnect
+bool bt_chess_was_in_game(void);
+
+// Save game state for syncing later
+void bt_chess_save_game_state(const ChessGame* game);
+
+// Send full game state sync (for reconnect)
+bool bt_chess_send_game_sync(const ChessGame* game);
+
+// Request game sync from opponent
+void bt_chess_request_game_sync(void);
+
+// Handle game sync data from opponent
+void bt_chess_process_game_sync(const uint8_t* data, size_t len);
+
+// Get if we have pending moves to resend
+bool bt_chess_has_pending_moves(void);
+
+// Resend pending moves after reconnect
+void bt_chess_resend_pending_moves(void);
+
 // --- Callback registration ---
 
 void bt_chess_set_state_callback(bt_chess_state_callback_t callback);
@@ -150,5 +190,9 @@ void bt_chess_set_invite_accepted_callback(bt_chess_invite_accepted_callback_t c
 void bt_chess_set_move_callback(bt_chess_move_received_callback_t callback);
 void bt_chess_set_game_over_callback(bt_chess_game_over_callback_t callback);
 void bt_chess_set_chat_callback(bt_chess_chat_received_callback_t callback);
+void bt_chess_set_sync_callback(bt_chess_sync_received_callback_t callback);
+
+// 调试函数：转储内部状态
+void bt_chess_debug_dump(void);
 
 #endif
