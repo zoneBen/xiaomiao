@@ -66,6 +66,7 @@ bool chess_network_reject_invite(const char* opponent_id);
 bool chess_network_send_move(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion);
 bool chess_network_send_chat(const char* message);
 bool chess_network_send_resign(void);
+bool chess_network_send_game_over(ChessColor winner);
 bool chess_network_send_draw_offer(void);
 bool chess_network_accept_draw(void);
 

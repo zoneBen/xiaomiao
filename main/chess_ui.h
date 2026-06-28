@@ -7,8 +7,9 @@
 
 typedef enum {
     SCREEN_MAIN_MENU,
-    SCREEN_NETWORK_SETUP,
-    SCREEN_LOBBY,
+    SCREEN_BLUETOOTH_MENU,
+    SCREEN_BLUETOOTH_SCAN,
+    SCREEN_BLUETOOTH_WAITING,
     SCREEN_GAME
 } ChessScreen;
 
@@ -27,12 +28,10 @@ void chess_ui_init(void);
 void chess_ui_deinit(void);
 void chess_ui_switch_screen(ChessScreen screen);
 void chess_ui_update_game(const ChessGame* game);
-void chess_ui_set_network_status(const char* status);
-void chess_ui_show_invite_dialog(const char* opponent_id);
-void chess_ui_hide_invite_dialog(void);
 void chess_ui_show_message(const char* message, int duration_ms);
 void chess_ui_handle_key(KeyCode key);
 void chess_ui_update(void);
 void chess_ui_render(void);
+void chess_ui_apply_opponent_move(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion);
 
 #endif

@@ -1,6 +1,5 @@
 #include "chess_ui.h"
-#include "chess_network.h"
-#include "network.h"
+#include "chess_bluetooth.h"
 #include "ui_lock.h"
 #include "tft_display.h"
 #include "chess_pieces.h"
@@ -15,10 +14,10 @@
 
 // Forward declarations
 static void render_main_menu(void);
-static void render_network_setup(void);
-static void render_lobby(void);
+static void render_bluetooth_menu(void);
+static void render_bluetooth_scan(void);
+static void render_bluetooth_waiting(void);
 static void render_game(void);
-static void render_invite_dialog(void);
 static void render_message(void);
 static void chess_ui_render_internal(void);
 
@@ -36,21 +35,12 @@ typedef struct {
     int selected_x;
     int selected_y;
     bool has_selection;
-
-    // Network setup screen
-    char ssid[32];
-    char password[32];
-    char mqtt_uri[64];
-    int input_field;  // 0=ssid, 1=password, 2=mqtt_uri
-    int input_pos;
     int cursor_blink;
 
-    // Lobby state
-    bool searching;
-
-    // Invite dialog
-    bool show_invite;
-    char invite_opponent[32];
+    // Bluetooth state
+    bool bluetooth_initialized;
+    int selected_device_index;
+    char bluetooth_status[64];
 
     // Message display
     bool show_message;
@@ -74,14 +64,14 @@ static ChessGame* g_game = NULL;
 // Menu items for main menu
 static const char* main_menu_items[] = {
     "Local Game",
-    "Network Game",
+    "Bluetooth Game",
     "Sound: Off"
 };
 
-// Menu items for lobby
-static const char* lobby_menu_items[] = {
-    "Search Opponent",
-    "Stop Search",
+// Menu items for Bluetooth menu
+static const char* bluetooth_menu_items[] = {
+    "Create Game",
+    "Join Game",
     "Back"
 };
 
@@ -116,15 +106,12 @@ void chess_ui_init(void)
     g_ui->selected_x = -1;
     g_ui->selected_y = -1;
     g_ui->has_selection = false;
-    g_ui->show_invite = false;
-    g_ui->input_field = 0;
-    g_ui->input_pos = 0;
-    g_ui->searching = false;
+    g_ui->bluetooth_initialized = false;
+    g_ui->selected_device_index = -1;
+    strcpy(g_ui->bluetooth_status, "Bluetooth: Disabled");
     g_ui->sound_enabled = true;
+    g_ui->cursor_blink = 0;
     sound_set_effects_enabled(true);
-
-    // Default WiFi/MQTT settings
-    strcpy(g_ui->mqtt_uri, "mqtt://broker.hivemq.com");
 
     // Create sprite buffer
     if (tft_sprite_create(&g_ui->sprite, TFT_WIDTH, TFT_HEIGHT) == ESP_OK) {
@@ -167,11 +154,21 @@ void chess_ui_switch_screen(ChessScreen screen)
         case SCREEN_MAIN_MENU:
             g_ui->menu_count = 3;
             break;
-        case SCREEN_NETWORK_SETUP:
-            g_ui->menu_count = 6;
-            break;
-        case SCREEN_LOBBY:
+        case SCREEN_BLUETOOTH_MENU:
             g_ui->menu_count = 3;
+            // Initialize Bluetooth if not already
+            if (!g_ui->bluetooth_initialized) {
+                bt_chess_init();
+                g_ui->bluetooth_initialized = true;
+                strcpy(g_ui->bluetooth_status, "Bluetooth: Ready");
+            }
+            break;
+        case SCREEN_BLUETOOTH_SCAN:
+            g_ui->menu_count = 0;
+            g_ui->selected_device_index = -1;
+            break;
+        case SCREEN_BLUETOOTH_WAITING:
+            g_ui->menu_count = 0;
             break;
         case SCREEN_GAME:
             chess_game_reset(g_game);
@@ -184,6 +181,32 @@ void chess_ui_switch_screen(ChessScreen screen)
     }
 }
 
+void chess_ui_apply_opponent_move(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion)
+{
+    if (!g_ui || !g_game) return;
+
+    ui_lock_acquire();
+
+    // Apply the move
+    if (chess_game_make_move(g_game, from_x, from_y, to_x, to_y, promotion)) {
+        // Play appropriate sound
+        ChessPiece captured = g_game->last_move.captured_piece;
+        if (captured.type != PIECE_NONE || g_game->last_move.is_en_passant) {
+            sound_play(SOUND_CAPTURE);
+        } else {
+            sound_play(SOUND_MOVE);
+        }
+
+        // Check for game over
+        if (chess_game_is_game_over(g_game)) {
+            sound_play(SOUND_CHECKMATE);
+        }
+    }
+
+    chess_ui_render_internal();
+    ui_lock_release();
+}
+
 void chess_ui_update_game(const ChessGame* game)
 {
     if (game && g_game) {
@@ -194,52 +217,6 @@ void chess_ui_update_game(const ChessGame* game)
     }
 }
 
-void chess_ui_set_network_status(const char* status)
-{
-    if (g_ui && status) {
-        ESP_LOGI(TAG, "Network status: %s", status);
-    }
-}
-
-// Internal versions - assume lock is already held
-static void chess_ui_show_invite_dialog_internal(const char* opponent_id)
-{
-    if (!g_ui || !opponent_id) return;
-
-    strncpy(g_ui->invite_opponent, opponent_id, sizeof(g_ui->invite_opponent) - 1);
-    g_ui->invite_opponent[sizeof(g_ui->invite_opponent) - 1] = '\0';
-    g_ui->show_invite = true;
-    g_ui->menu_index = 0;
-    chess_ui_render_internal();
-}
-
-static void chess_ui_hide_invite_dialog_internal(void)
-{
-    if (g_ui) {
-        g_ui->show_invite = false;
-        chess_ui_render_internal();
-    }
-}
-
-void chess_ui_show_invite_dialog(const char* opponent_id)
-{
-    if (!g_ui || !opponent_id) return;
-
-    ESP_LOGI(TAG, "Showing invite from %s", opponent_id);
-
-    ui_lock_acquire();
-    chess_ui_show_invite_dialog_internal(opponent_id);
-    ui_lock_release();
-}
-
-void chess_ui_hide_invite_dialog(void)
-{
-    if (g_ui) {
-        ui_lock_acquire();
-        chess_ui_hide_invite_dialog_internal();
-        ui_lock_release();
-    }
-}
 
 // Internal version - assumes lock is already held
 static void chess_ui_show_message_internal(const char* message, int duration_ms)
@@ -270,29 +247,6 @@ void chess_ui_handle_key(KeyCode key)
 
     ui_lock_acquire();
 
-    // Handle invite dialog first
-    if (g_ui->show_invite) {
-        if (key == KEY_LEFT || key == KEY_RIGHT) {
-            sound_play(SOUND_KEY_CLICK);
-            g_ui->menu_index = (g_ui->menu_index == 0) ? 1 : 0;
-        } else if (key == KEY_A) {
-            sound_play(SOUND_MENU_SELECT);
-            if (g_ui->menu_index == 0) {
-                chess_network_accept_invite(g_ui->invite_opponent);
-                chess_ui_switch_screen(SCREEN_GAME);
-            } else {
-                chess_network_reject_invite(g_ui->invite_opponent);
-            }
-            g_ui->show_invite = false;
-        } else if (key == KEY_B) {
-            sound_play(SOUND_KEY_CLICK);
-            g_ui->show_invite = false;
-        }
-        chess_ui_render_internal();
-        ui_lock_release();
-        return;
-    }
-
     switch (g_ui->current_screen) {
         case SCREEN_MAIN_MENU:
             if (key == KEY_UP) {
@@ -311,7 +265,7 @@ void chess_ui_handle_key(KeyCode key)
                     chess_ui_switch_screen(SCREEN_GAME);
                 } else if (g_ui->menu_index == 1) {
                     sound_play(SOUND_MENU_SELECT);
-                    chess_ui_switch_screen(SCREEN_NETWORK_SETUP);
+                    chess_ui_switch_screen(SCREEN_BLUETOOTH_MENU);
                 } else if (g_ui->menu_index == 2) {
                     // Toggle sound effects
                     g_ui->sound_enabled = !g_ui->sound_enabled;
@@ -325,79 +279,75 @@ void chess_ui_handle_key(KeyCode key)
             }
             break;
 
-        case SCREEN_NETWORK_SETUP:
+        case SCREEN_BLUETOOTH_MENU:
             if (key == KEY_UP) {
                 if (g_ui->menu_index > 0) {
                     sound_play(SOUND_KEY_CLICK);
                     g_ui->menu_index--;
                 }
             } else if (key == KEY_DOWN) {
-                if (g_ui->menu_index < 5) {
-                    sound_play(SOUND_KEY_CLICK);
-                    g_ui->menu_index++;
-                }
-            } else if (key == KEY_A) {
-                sound_play(SOUND_MENU_SELECT);
-                if (g_ui->menu_index == 3) {
-                    // Connect
-                    if (strlen(g_ui->ssid) > 0) {
-                        network_set_wifi_credentials(g_ui->ssid, g_ui->password);
-                        network_set_mqtt_config(g_ui->mqtt_uri, chess_network_get_player_id(), "", "");
-                        network_connect();
-                    }
-                } else if (g_ui->menu_index == 4) {
-                    // Disconnect
-                    network_disconnect();
-                } else if (g_ui->menu_index == 5) {
-                    // Back
-                    if (network_is_connected()) {
-                        chess_ui_switch_screen(SCREEN_LOBBY);
-                    } else {
-                        chess_ui_switch_screen(SCREEN_MAIN_MENU);
-                    }
-                }
-            } else if (key == KEY_B) {
-                sound_play(SOUND_KEY_CLICK);
-                // Back
-                if (network_is_connected()) {
-                    chess_ui_switch_screen(SCREEN_LOBBY);
-                } else {
-                    chess_ui_switch_screen(SCREEN_MAIN_MENU);
-                }
-            }
-            break;
-
-        case SCREEN_LOBBY:
-            if (key == KEY_UP) {
-                if (g_ui->menu_index > 0) {
-                    sound_play(SOUND_KEY_CLICK);
-                    g_ui->menu_index--;
-                }
-            } else if (key == KEY_DOWN) {
-                if (g_ui->menu_index < g_ui->menu_count - 1) {
+                if (g_ui->menu_index < 2) {
                     sound_play(SOUND_KEY_CLICK);
                     g_ui->menu_index++;
                 }
             } else if (key == KEY_A) {
                 sound_play(SOUND_MENU_SELECT);
                 if (g_ui->menu_index == 0) {
-                    // Search opponent
-                    if (chess_network_start_search()) {
-                        g_ui->searching = true;
+                    // Create game (host)
+                    if (bt_chess_start_hosting()) {
+                        strcpy(g_ui->bluetooth_status, "Waiting for opponent...");
+                        chess_ui_switch_screen(SCREEN_BLUETOOTH_WAITING);
                     }
                 } else if (g_ui->menu_index == 1) {
-                    // Stop search
-                    chess_network_stop_search();
-                    g_ui->searching = false;
+                    // Join game (scan)
+                    if (bt_chess_start_scanning()) {
+                        strcpy(g_ui->bluetooth_status, "Scanning...");
+                        chess_ui_switch_screen(SCREEN_BLUETOOTH_SCAN);
+                    }
                 } else {
                     // Back
-                    chess_network_stop_search();
-                    chess_ui_switch_screen(SCREEN_NETWORK_SETUP);
+                    chess_ui_switch_screen(SCREEN_MAIN_MENU);
                 }
             } else if (key == KEY_B) {
                 sound_play(SOUND_KEY_CLICK);
-                chess_network_stop_search();
-                chess_ui_switch_screen(SCREEN_NETWORK_SETUP);
+                chess_ui_switch_screen(SCREEN_MAIN_MENU);
+            }
+            break;
+
+        case SCREEN_BLUETOOTH_SCAN:
+            if (key == KEY_UP) {
+                if (g_ui->selected_device_index > 0) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->selected_device_index--;
+                }
+            } else if (key == KEY_DOWN) {
+                int device_count = bt_chess_get_found_device_count();
+                if (g_ui->selected_device_index < device_count - 1) {
+                    sound_play(SOUND_KEY_CLICK);
+                    g_ui->selected_device_index++;
+                }
+            } else if (key == KEY_A) {
+                if (g_ui->selected_device_index >= 0) {
+                    sound_play(SOUND_MENU_SELECT);
+                    if (bt_chess_connect_to_device(g_ui->selected_device_index)) {
+                        strcpy(g_ui->bluetooth_status, "Connecting...");
+                        chess_ui_switch_screen(SCREEN_BLUETOOTH_WAITING);
+                    }
+                }
+            } else if (key == KEY_B) {
+                sound_play(SOUND_KEY_CLICK);
+                bt_chess_stop_scanning();
+                chess_ui_switch_screen(SCREEN_BLUETOOTH_MENU);
+            }
+            break;
+
+        case SCREEN_BLUETOOTH_WAITING:
+            if (key == KEY_B) {
+                sound_play(SOUND_KEY_CLICK);
+                bt_chess_disconnect();
+                bt_chess_stop_hosting();
+                bt_chess_stop_scanning();
+                chess_ui_switch_screen(SCREEN_BLUETOOTH_MENU);
             }
             break;
 
@@ -413,6 +363,14 @@ void chess_ui_handle_key(KeyCode key)
                     chess_ui_switch_screen(SCREEN_MAIN_MENU);
                 }
                 break;
+            }
+
+            // Check if it's our turn in bluetooth game
+            bool is_bluetooth_game = (bt_chess_get_state() == BT_CHESS_STATE_GAME_READY ||
+                                     bt_chess_get_state() == BT_CHESS_STATE_PLAYING);
+            bool is_our_turn = true;
+            if (is_bluetooth_game) {
+                is_our_turn = bt_chess_is_my_turn();
             }
 
             // Normal game handling when game is not over
@@ -438,6 +396,13 @@ void chess_ui_handle_key(KeyCode key)
                 }
             } else if (key == KEY_A) {
                 ChessPiece piece = chess_game_get_piece(g_game, g_ui->cursor_x, g_ui->cursor_y);
+
+                // Only allow moves if it's our turn
+                if (!is_our_turn && is_bluetooth_game) {
+                    sound_play(SOUND_INVALID_MOVE);
+                    chess_ui_show_message_internal("Not your turn!", 1000);
+                    break;
+                }
 
                 if (g_ui->has_selection) {
                     if (g_ui->selected_x == g_ui->cursor_x && g_ui->selected_y == g_ui->cursor_y) {
@@ -471,11 +436,15 @@ void chess_ui_handle_key(KeyCode key)
                                     chess_ui_show_message_internal("Black captured king!", 3000);
                                     sound_play(SOUND_CHECKMATE);
                                 }
+                                // Send game over
+                                if (is_bluetooth_game) {
+                                    bt_chess_send_game_over(winner);
+                                }
                             }
 
-                            if (chess_network_get_state() == CHESS_NET_STATE_PLAYING) {
-                                chess_network_send_move(g_ui->selected_x, g_ui->selected_y,
-                                                        g_ui->cursor_x, g_ui->cursor_y, PIECE_QUEEN);
+                            if (is_bluetooth_game) {
+                                bt_chess_send_move(g_ui->selected_x, g_ui->selected_y,
+                                                   g_ui->cursor_x, g_ui->cursor_y, PIECE_QUEEN);
                             }
                         } else {
                             sound_play(SOUND_INVALID_MOVE);
@@ -519,9 +488,9 @@ void chess_ui_handle_key(KeyCode key)
                     g_ui->selected_x = -1;
                     g_ui->selected_y = -1;
                 } else {
-                    // Back to menu
-                    if (chess_network_get_state() == CHESS_NET_STATE_PLAYING) {
-                        chess_network_send_resign();
+                    // Back to menu - send resignation if in game
+                    if (is_bluetooth_game) {
+                        bt_chess_send_resign();
                     }
                     chess_ui_switch_screen(SCREEN_MAIN_MENU);
                 }
@@ -572,20 +541,18 @@ static void chess_ui_render_internal(void)
         case SCREEN_MAIN_MENU:
             render_main_menu();
             break;
-        case SCREEN_NETWORK_SETUP:
-            render_network_setup();
+        case SCREEN_BLUETOOTH_MENU:
+            render_bluetooth_menu();
             break;
-        case SCREEN_LOBBY:
-            render_lobby();
+        case SCREEN_BLUETOOTH_SCAN:
+            render_bluetooth_scan();
+            break;
+        case SCREEN_BLUETOOTH_WAITING:
+            render_bluetooth_waiting();
             break;
         case SCREEN_GAME:
             render_game();
             break;
-    }
-
-    // Render invite dialog on top
-    if (g_ui->show_invite) {
-        render_invite_dialog();
     }
 
     // Render message
@@ -636,97 +603,16 @@ static void render_main_menu(void)
             text++;
         }
     }
-
-    // Player ID
-    char id_text[32];
-    snprintf(id_text, sizeof(id_text), "ID: %s", chess_network_get_player_id());
-    int id_x = (TFT_WIDTH - tft_sprite_text_width(id_text, 1)) / 2;
-    int text_x = id_x;
-    const char* text = id_text;
-    while (*text) {
-        tft_sprite_draw_char(&g_ui->sprite, text_x, 110, *text, TFT_LIGHTGREY, 1);
-        text_x += 6;
-        text++;
-    }
 }
 
-static void render_network_setup(void)
+
+
+static void render_bluetooth_menu(void)
 {
     // Title
-    int title_x = (TFT_WIDTH - tft_sprite_text_width("Network Setup", 1)) / 2;
+    int title_x = (TFT_WIDTH - tft_sprite_text_width("Bluetooth Game", 1)) / 2;
     int text_x = title_x;
-    const char* text = "Network Setup";
-    while (*text) {
-        tft_sprite_draw_char(&g_ui->sprite, text_x, 5, *text, TFT_WHITE, 1);
-        text_x += 6;
-        text++;
-    }
-
-    // Menu items
-    const char* items[] = {"WiFi SSID:", "Password:", "MQTT Broker:", "Connect", "Disconnect", "Back"};
-    for (int i = 0; i < 6; i++) {
-        int y = 20 + i * 15;
-        bool is_selected = (i == g_ui->menu_index);
-
-        if (is_selected) {
-            tft_sprite_fill_rect(&g_ui->sprite, 5, y, 150, 14, TFT_NAVY);
-        }
-
-        // Label
-        text_x = 10;
-        text = items[i];
-        while (*text) {
-            tft_sprite_draw_char(&g_ui->sprite, text_x, y + 4, *text, is_selected ? TFT_YELLOW : TFT_WHITE, 1);
-            text_x += 6;
-            text++;
-        }
-
-        // Values for input fields
-        if (i == 0 && strlen(g_ui->ssid) > 0) {
-            text = g_ui->ssid;
-            text_x = 70;
-            while (*text && text_x < 155) {
-                tft_sprite_draw_char(&g_ui->sprite, text_x, y + 4, *text, is_selected ? TFT_YELLOW : TFT_LIGHTGREY, 1);
-                text_x += 6;
-                text++;
-            }
-        } else if (i == 1 && strlen(g_ui->password) > 0) {
-            text = "********";
-            text_x = 70;
-            while (*text && text_x < 155) {
-                tft_sprite_draw_char(&g_ui->sprite, text_x, y + 4, *text, is_selected ? TFT_YELLOW : TFT_LIGHTGREY, 1);
-                text_x += 6;
-                text++;
-            }
-        } else if (i == 2) {
-            text = g_ui->mqtt_uri;
-            text_x = 70;
-            while (*text && text_x < 155) {
-                tft_sprite_draw_char(&g_ui->sprite, text_x, y + 4, *text, is_selected ? TFT_YELLOW : TFT_LIGHTGREY, 1);
-                text_x += 6;
-                text++;
-            }
-        }
-    }
-
-    // Status
-    const char* status_text = network_is_connected() ? "Status: Connected" : "Status: Disconnected";
-    uint16_t status_color = network_is_connected() ? TFT_GREEN : TFT_RED;
-    text_x = 10;
-    text = status_text;
-    while (*text) {
-        tft_sprite_draw_char(&g_ui->sprite, text_x, 118, *text, status_color, 1);
-        text_x += 6;
-        text++;
-    }
-}
-
-static void render_lobby(void)
-{
-    // Title
-    int title_x = (TFT_WIDTH - tft_sprite_text_width("Game Lobby", 1)) / 2;
-    int text_x = title_x;
-    const char* text = "Game Lobby";
+    const char* text = "Bluetooth Game";
     while (*text) {
         tft_sprite_draw_char(&g_ui->sprite, text_x, 5, *text, TFT_WHITE, 1);
         text_x += 6;
@@ -734,21 +620,17 @@ static void render_lobby(void)
     }
 
     // Status
-    const char* status_text = g_ui->searching ? "Searching for opponent..." : "Status: Waiting";
     text_x = 10;
-    text = status_text;
+    text = g_ui->bluetooth_status;
     while (*text) {
-        tft_sprite_draw_char(&g_ui->sprite, text_x, 20, *text, g_ui->searching ? TFT_YELLOW : TFT_LIGHTGREY, 1);
+        tft_sprite_draw_char(&g_ui->sprite, text_x, 20, *text, TFT_LIGHTGREY, 1);
         text_x += 6;
         text++;
     }
 
     // Menu items
-    int display_i = 0;
     for (int i = 0; i < 3; i++) {
-        if (i == 1 && !g_ui->searching) continue;
-
-        int y = 40 + display_i * 25;
+        int y = 40 + i * 25;
         bool is_selected = (i == g_ui->menu_index);
 
         if (is_selected) {
@@ -756,13 +638,103 @@ static void render_lobby(void)
         }
 
         text_x = 25;
-        text = lobby_menu_items[i];
+        text = bluetooth_menu_items[i];
         while (*text) {
             tft_sprite_draw_char(&g_ui->sprite, text_x, y + 6, *text, is_selected ? TFT_YELLOW : TFT_WHITE, 1);
             text_x += 6;
             text++;
         }
-        display_i++;
+    }
+}
+
+static void render_bluetooth_scan(void)
+{
+    // Title
+    int title_x = (TFT_WIDTH - tft_sprite_text_width("Scan Results", 1)) / 2;
+    int text_x = title_x;
+    const char* text = "Scan Results";
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, 5, *text, TFT_WHITE, 1);
+        text_x += 6;
+        text++;
+    }
+
+    // Found devices
+    int device_count = bt_chess_get_found_device_count();
+    int max_display = 4;  // Display up to 4 devices
+    int display_count = (device_count < max_display) ? device_count : max_display;
+
+    if (device_count == 0) {
+        text_x = 10;
+        text = "Searching...";
+        while (*text) {
+            tft_sprite_draw_char(&g_ui->sprite, text_x, 25, *text, TFT_YELLOW, 1);
+            text_x += 6;
+            text++;
+        }
+    } else {
+        for (int i = 0; i < display_count; i++) {
+            const FoundBluetoothDevice* device = bt_chess_get_found_device(i);
+            if (!device) continue;
+
+            int y = 25 + i * 25;
+            bool is_selected = (i == g_ui->selected_device_index);
+
+            if (is_selected) {
+                tft_sprite_fill_rect(&g_ui->sprite, 5, y, TFT_WIDTH - 10, 20, TFT_NAVY);
+            }
+
+            // Display name/hash
+            text_x = 10;
+            char display_name[32];
+            snprintf(display_name, sizeof(display_name), "%s", device->name);
+            text = display_name;
+            while (*text && text_x < TFT_WIDTH - 10) {
+                tft_sprite_draw_char(&g_ui->sprite, text_x, y + 6, *text, is_selected ? TFT_YELLOW : TFT_WHITE, 1);
+                text_x += 6;
+                text++;
+            }
+        }
+    }
+
+    // Instructions
+    text_x = 10;
+    text = "B: Back";
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, TFT_HEIGHT - 12, *text, TFT_LIGHTGREY, 1);
+        text_x += 6;
+        text++;
+    }
+}
+
+static void render_bluetooth_waiting(void)
+{
+    // Title
+    int title_x = (TFT_WIDTH - tft_sprite_text_width("Waiting...", 1)) / 2;
+    int text_x = title_x;
+    const char* text = "Waiting...";
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, 40, *text, TFT_WHITE, 1);
+        text_x += 6;
+        text++;
+    }
+
+    // Status
+    text_x = 10;
+    text = g_ui->bluetooth_status;
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, 60, *text, TFT_YELLOW, 1);
+        text_x += 6;
+        text++;
+    }
+
+    // Instructions
+    text_x = 10;
+    text = "B: Cancel";
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, TFT_HEIGHT - 12, *text, TFT_LIGHTGREY, 1);
+        text_x += 6;
+        text++;
     }
 }
 
@@ -878,6 +850,22 @@ static void render_game(void)
         text++;
     }
 
+    // Bluetooth game indicator
+    BluetoothChessState bt_state = bt_chess_get_state();
+    if (bt_state >= BT_CHESS_STATE_GAME_READY) {
+        // Show if it's our turn
+        uint16_t turn_color = bt_chess_is_my_turn() ? TFT_GREEN : TFT_RED;
+        tft_sprite_fill_rect(&g_ui->sprite, sidebar_x, 110, 32, 14, turn_color);
+        const char* turn_text = bt_chess_is_my_turn() ? "YOU" : "OPP";
+        text_x = sidebar_x + 6;
+        int i = 0;
+        while (turn_text[i]) {
+            tft_sprite_draw_char(&g_ui->sprite, text_x, 114, turn_text[i], TFT_BLACK, 1);
+            text_x += 6;
+            i++;
+        }
+    }
+
     // Game over overlay
     if (chess_game_is_game_over(g_game)) {
         // Dim background
@@ -918,62 +906,6 @@ static void render_game(void)
     }
 }
 
-static void render_invite_dialog(void)
-{
-    // Dialog background
-    tft_sprite_fill_rect(&g_ui->sprite, 15, 35, 130, 60, COLOR_DIALOG);
-    tft_sprite_draw_rect(&g_ui->sprite, 15, 35, 130, 60, TFT_WHITE);
-
-    // Title
-    int title_x = (TFT_WIDTH - tft_sprite_text_width("Invite from:", 1)) / 2;
-    int text_x = title_x;
-    const char* text = "Invite from:";
-    while (*text) {
-        tft_sprite_draw_char(&g_ui->sprite, text_x, 45, *text, TFT_WHITE, 1);
-        text_x += 6;
-        text++;
-    }
-
-    // Opponent ID
-    int id_x = (TFT_WIDTH - tft_sprite_text_width(g_ui->invite_opponent, 1)) / 2;
-    text_x = id_x;
-    text = g_ui->invite_opponent;
-    while (*text) {
-        tft_sprite_draw_char(&g_ui->sprite, text_x, 58, *text, TFT_YELLOW, 1);
-        text_x += 6;
-        text++;
-    }
-
-    // Buttons
-    const char* btn1 = "Accept";
-    const char* btn2 = "Reject";
-
-    // Button 1
-    bool is_selected = (g_ui->menu_index == 0);
-    if (is_selected) {
-        tft_sprite_fill_rect(&g_ui->sprite, 25, 75, 50, 14, TFT_NAVY);
-    }
-    text_x = 30;
-    text = btn1;
-    while (*text) {
-        tft_sprite_draw_char(&g_ui->sprite, text_x, 80, *text, is_selected ? TFT_YELLOW : TFT_WHITE, 1);
-        text_x += 6;
-        text++;
-    }
-
-    // Button 2
-    is_selected = (g_ui->menu_index == 1);
-    if (is_selected) {
-        tft_sprite_fill_rect(&g_ui->sprite, 85, 75, 50, 14, TFT_NAVY);
-    }
-    text_x = 90;
-    text = btn2;
-    while (*text) {
-        tft_sprite_draw_char(&g_ui->sprite, text_x, 80, *text, is_selected ? TFT_YELLOW : TFT_WHITE, 1);
-        text_x += 6;
-        text++;
-    }
-}
 
 static void render_message(void)
 {

@@ -8,8 +8,7 @@
 #include "esp_log.h"
 #include "chess.h"
 #include "chess_ui.h"
-#include "chess_network.h"
-#include "network.h"
+#include "chess_bluetooth.h"
 #include "ui_lock.h"
 #include "tft_display.h"
 #include "sound.h"
@@ -139,37 +138,63 @@ static void ui_update_task(void* arg)
     }
 }
 
-static void network_state_change(NetworkState state)
+// Bluetooth chess callbacks
+static void bt_chess_state_change(BluetoothChessState state)
 {
-    const char* status_str = "Unknown";
-    switch (state) {
-        case NETWORK_STATE_DISCONNECTED: status_str = "Status: Disconnected"; break;
-        case NETWORK_STATE_CONNECTING_WIFI: status_str = "Status: Connecting WiFi..."; break;
-        case NETWORK_STATE_WIFI_CONNECTED: status_str = "Status: WiFi Connected"; break;
-        case NETWORK_STATE_CONNECTING_MQTT: status_str = "Status: Connecting MQTT..."; break;
-        case NETWORK_STATE_MQTT_CONNECTED: status_str = "Status: Connected"; break;
-        case NETWORK_STATE_ERROR: status_str = "Status: Error"; break;
-    }
-    chess_ui_set_network_status(status_str);
+    ESP_LOGI(TAG, "Bluetooth state: %d", state);
+    // Update UI status
     chess_ui_render();
 }
 
-static void chess_network_state_change(ChessNetworkState state)
+static void bt_chess_device_found(const FoundBluetoothDevice* device, int index)
 {
-    ESP_LOGI(TAG, "Chess network state: %d", state);
+    ESP_LOGI(TAG, "Found device %d: %s", index, device->name);
+    chess_ui_render();
 }
 
-static void chess_invite_received(const char* opponent_id)
+static void bt_chess_device_list_complete(int count)
 {
-    ESP_LOGI(TAG, "Received invite from %s", opponent_id);
-    chess_ui_show_invite_dialog(opponent_id);
+    ESP_LOGI(TAG, "Device list complete: %d devices", count);
+    chess_ui_render();
 }
 
-static void chess_move_received(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion)
+static void bt_chess_connected(void)
 {
-    ESP_LOGI(TAG, "Received move: %d,%d -> %d,%d", from_x, from_y, to_x, to_y);
-    ui_lock_acquire();
-    ui_lock_release();
+    ESP_LOGI(TAG, "Bluetooth connected");
+    chess_ui_switch_screen(SCREEN_BLUETOOTH_WAITING);
+}
+
+static void bt_chess_disconnected(void)
+{
+    ESP_LOGI(TAG, "Bluetooth disconnected");
+    chess_ui_switch_screen(SCREEN_BLUETOOTH_MENU);
+}
+
+static void bt_chess_invite_received(void)
+{
+    ESP_LOGI(TAG, "Bluetooth invite received");
+    // Host automatically accepts or shows prompt
+    // For simplicity, let's auto-accept and send color assignment
+    bt_chess_accept_connection();
+}
+
+static void bt_chess_invite_accepted(ChessColor local_color)
+{
+    ESP_LOGI(TAG, "Bluetooth invite accepted, local color: %d", local_color);
+    chess_ui_switch_screen(SCREEN_GAME);
+}
+
+static void bt_chess_move_received(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion)
+{
+    ESP_LOGI(TAG, "Bluetooth move: %d,%d -> %d,%d", from_x, from_y, to_x, to_y);
+    // Apply the opponent's move
+    chess_ui_apply_opponent_move(from_x, from_y, to_x, to_y, promotion);
+}
+
+static void bt_chess_game_over(ChessColor winner)
+{
+    ESP_LOGI(TAG, "Bluetooth game over, winner: %d", winner);
+    chess_ui_render();
 }
 
 void app_main(void)
@@ -195,15 +220,17 @@ void app_main(void)
     xTaskCreate(key_scan_task, "KeyScan", 4096, NULL, 5, NULL);
     xTaskCreate(ui_update_task, "UIUpdate", 4096, NULL, 4, NULL);
 
-    ESP_LOGI(TAG, "Initialize network");
-    network_init();
-    network_set_state_callback(network_state_change);
-
-    ESP_LOGI(TAG, "Initialize chess network");
-    chess_network_init();
-    chess_network_set_state_callback(chess_network_state_change);
-    chess_network_set_invite_callback(chess_invite_received);
-    chess_network_set_move_callback(chess_move_received);
+    ESP_LOGI(TAG, "Initialize bluetooth chess (will be initialized on first use)");
+    // Note: bt_chess_init() will be called from the UI when entering the Bluetooth menu
+    bt_chess_set_state_callback(bt_chess_state_change);
+    bt_chess_set_device_found_callback(bt_chess_device_found);
+    bt_chess_set_device_list_complete_callback(bt_chess_device_list_complete);
+    bt_chess_set_connected_callback(bt_chess_connected);
+    bt_chess_set_disconnected_callback(bt_chess_disconnected);
+    bt_chess_set_invite_callback(bt_chess_invite_received);
+    bt_chess_set_invite_accepted_callback(bt_chess_invite_accepted);
+    bt_chess_set_move_callback(bt_chess_move_received);
+    bt_chess_set_game_over_callback(bt_chess_game_over);
 
     ESP_LOGI(TAG, "XiaoMiao Chess started!");
 }

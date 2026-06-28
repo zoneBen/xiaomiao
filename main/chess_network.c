@@ -390,6 +390,26 @@ bool chess_network_send_resign(void) {
     return success;
 }
 
+bool chess_network_send_game_over(ChessColor winner) {
+    if (!g_ctx || !network_is_connected() || !g_ctx->net_ctx.game_ready) {
+        return false;
+    }
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "type", CHESS_NET_MSG_GAME_OVER);
+    cJSON_AddStringToObject(root, "from", g_ctx->net_ctx.player_id);
+    cJSON_AddNumberToObject(root, "winner", winner);
+
+    bool success = send_json(g_ctx->net_ctx.game_topic, root);
+    cJSON_Delete(root);
+
+    if (success) {
+        update_state(CHESS_NET_STATE_GAME_OVER);
+    }
+
+    return success;
+}
+
 bool chess_network_send_draw_offer(void) {
     if (!g_ctx || !network_is_connected() || !g_ctx->net_ctx.game_ready) {
         return false;
