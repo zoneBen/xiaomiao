@@ -14,3 +14,4 @@ Makefile
 *.swo
 *~
 .DS_Store
+chess_merged.bin
