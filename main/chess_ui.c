@@ -238,13 +238,14 @@ void chess_ui_switch_screen(ChessScreen screen)
             g_ui->menu_count = 0;
             break;
         case SCREEN_GAME:
-            // 只有当不是从重连状态回来时才重置棋盘
+            // 只有当不是从重连状态或退出确认对话框回来时才重置棋盘
             BluetoothChessState bt_state = bt_chess_get_state();
             bool was_reconnecting = (bt_state == BT_CHESS_STATE_GAME_READY ||
                                      bt_state == BT_CHESS_STATE_PLAYING ||
                                      bt_state == BT_CHESS_STATE_RECONNECTING);
+            bool was_in_exit_confirm = (g_ui->previous_screen == SCREEN_EXIT_CONFIRM);
 
-            if (!was_reconnecting) {
+            if (!was_reconnecting && !was_in_exit_confirm) {
                 // 新游戏才重置
                 chess_game_reset(g_game);
                 g_ui->cursor_x = 0;
