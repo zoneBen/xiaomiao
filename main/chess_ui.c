@@ -147,6 +147,17 @@ void chess_ui_switch_screen(ChessScreen screen)
 
     ESP_LOGI(TAG, "Switching to screen %d", screen);
 
+    // Clean up Bluetooth when returning to main menu
+    if (screen == SCREEN_MAIN_MENU &&
+        (g_ui->current_screen == SCREEN_BLUETOOTH_SCAN ||
+         g_ui->current_screen == SCREEN_BLUETOOTH_WAITING ||
+         g_ui->current_screen == SCREEN_BLUETOOTH_MENU)) {
+        ESP_LOGI(TAG, "Cleaning up Bluetooth on return to main menu");
+        bt_chess_stop_scanning();
+        bt_chess_stop_hosting();
+        // Don't fully disconnect/deinit as we might use it again soon
+    }
+
     g_ui->current_screen = screen;
     g_ui->menu_index = 0;
 
