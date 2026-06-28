@@ -34,4 +34,9 @@ void chess_ui_update(void);
 void chess_ui_render(void);
 void chess_ui_apply_opponent_move(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion);
 
+// Internal versions - assume ui lock is already held (for UI task only)
+void chess_ui_apply_opponent_move_locked(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion);
+void chess_ui_render_locked(void);
+void chess_ui_render_locked_force(void);  // Bypasses throttling, forces immediate render
+
 #endif

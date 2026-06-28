@@ -19,7 +19,6 @@ static void render_bluetooth_scan(void);
 static void render_bluetooth_waiting(void);
 static void render_game(void);
 static void render_message(void);
-static void chess_ui_render_internal(void);
 
 static const char* TAG = "chess_ui";
 
@@ -192,11 +191,10 @@ void chess_ui_switch_screen(ChessScreen screen)
     }
 }
 
-void chess_ui_apply_opponent_move(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion)
+// Internal version - assumes lock is already held
+void chess_ui_apply_opponent_move_locked(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion)
 {
     if (!g_ui || !g_game) return;
-
-    ui_lock_acquire();
 
     // Apply the move
     if (chess_game_make_move(g_game, from_x, from_y, to_x, to_y, promotion)) {
@@ -214,7 +212,15 @@ void chess_ui_apply_opponent_move(int from_x, int from_y, int to_x, int to_y, Ch
         }
     }
 
-    chess_ui_render_internal();
+    chess_ui_render_locked();
+}
+
+void chess_ui_apply_opponent_move(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion)
+{
+    if (!g_ui || !g_game) return;
+
+    ui_lock_acquire();
+    chess_ui_apply_opponent_move_locked(from_x, from_y, to_x, to_y, promotion);
     ui_lock_release();
 }
 
@@ -223,7 +229,7 @@ void chess_ui_update_game(const ChessGame* game)
     if (game && g_game) {
         ui_lock_acquire();
         memcpy(g_game, game, sizeof(ChessGame));
-        chess_ui_render_internal();
+        chess_ui_render_locked();
         ui_lock_release();
     }
 }
@@ -238,7 +244,7 @@ static void chess_ui_show_message_internal(const char* message, int duration_ms)
     g_ui->message_text[sizeof(g_ui->message_text) - 1] = '\0';
     g_ui->show_message = true;
     g_ui->message_timer = duration_ms / 100;  // Convert to 100ms ticks
-    chess_ui_render_internal();
+    chess_ui_render_locked();
 }
 
 void chess_ui_show_message(const char* message, int duration_ms)
@@ -346,9 +352,13 @@ void chess_ui_handle_key(KeyCode key)
                     }
                 }
             } else if (key == KEY_B) {
+                ESP_LOGI(TAG, "KEY_B pressed - playing sound...");
                 sound_play(SOUND_KEY_CLICK);
+                ESP_LOGI(TAG, "Calling bt_chess_stop_scanning...");
                 bt_chess_stop_scanning();
+                ESP_LOGI(TAG, "Calling chess_ui_switch_screen...");
                 chess_ui_switch_screen(SCREEN_BLUETOOTH_MENU);
+                ESP_LOGI(TAG, "Screen switched");
             }
             break;
 
@@ -509,8 +519,11 @@ void chess_ui_handle_key(KeyCode key)
             break;
     }
 
-    chess_ui_render_internal();
+    ESP_LOGI(TAG, "Calling chess_ui_render_locked...");
+    chess_ui_render_locked();
+    ESP_LOGI(TAG, "Releasing ui_lock...");
     ui_lock_release();
+    ESP_LOGI(TAG, "Key handler completed");
 }
 
 void chess_ui_update(void)
@@ -533,13 +546,13 @@ void chess_ui_update(void)
 }
 
 // Internal render function - assumes lock is already held
-static void chess_ui_render_internal(void)
+static void chess_ui_render_internal(bool force)
 {
     if (!g_ui || !g_ui->sprite_created) return;
 
-    // Throttle rendering to max 30 FPS (33ms per frame)
+    // Throttle rendering to max 30 FPS (33ms per frame) unless forced
     int64_t now = esp_timer_get_time();
-    if (now - g_ui->last_render_tick < 33000) {  // 33ms = ~30 FPS
+    if (!force && now - g_ui->last_render_tick < 33000) {  // 33ms = ~30 FPS
         return;
     }
     g_ui->last_render_tick = now;
@@ -575,12 +588,24 @@ static void chess_ui_render_internal(void)
     tft_sprite_push(&g_ui->sprite, 0, 0);
 }
 
+// Internal render function - assumes lock is already held
+void chess_ui_render_locked(void)
+{
+    chess_ui_render_internal(false);
+}
+
+// Internal render function - assumes lock is already held, bypasses throttling
+void chess_ui_render_locked_force(void)
+{
+    chess_ui_render_internal(true);
+}
+
 void chess_ui_render(void)
 {
     if (!g_ui || !g_ui->sprite_created) return;
 
     ui_lock_acquire();
-    chess_ui_render_internal();
+    chess_ui_render_locked();
     ui_lock_release();
 }
 
@@ -670,9 +695,10 @@ static void render_bluetooth_scan(void)
         text++;
     }
 
-    // Found devices
-    int device_count = bt_chess_get_found_device_count();
-    int max_display = 4;  // Display up to 4 devices
+    // Found devices - make a local copy to avoid holding the lock during rendering
+    FoundBluetoothDevice local_devices[MAX_FOUND_DEVICES];
+    int device_count = bt_chess_copy_found_devices(local_devices, MAX_FOUND_DEVICES);
+    int max_display = 4;
     int display_count = (device_count < max_display) ? device_count : max_display;
 
     if (device_count == 0) {
@@ -685,9 +711,7 @@ static void render_bluetooth_scan(void)
         }
     } else {
         for (int i = 0; i < display_count; i++) {
-            const FoundBluetoothDevice* device = bt_chess_get_found_device(i);
-            if (!device) continue;
-
+            FoundBluetoothDevice* device = &local_devices[i];
             int y = 25 + i * 25;
             bool is_selected = (i == g_ui->selected_device_index);
 

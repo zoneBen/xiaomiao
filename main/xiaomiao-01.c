@@ -138,32 +138,63 @@ static void key_scan_task(void* arg)
 static void ui_update_task(void* arg)
 {
     TickType_t last_wakeup = xTaskGetTickCount();
-    const TickType_t update_delay = pdMS_TO_TICKS(50);  // Faster updates for Bluetooth
+    const TickType_t update_delay = pdMS_TO_TICKS(33);  // 30 FPS
 
     ESP_LOGI(TAG, "UI update task started");
 
+    // Local copies for thread-safe operation
+    bool need_screen_switch = false;
+    bool need_apply_move = false;
+    bool need_render = false;
+    ChessScreen requested_screen = SCREEN_MAIN_MENU;
+    int move_from_x = 0, move_from_y = 0, move_to_x = 0, move_to_y = 0;
+    ChessPieceType move_promotion = PIECE_NONE;
+
     while (1) {
+        // Step 1: Check and collect requests without holding the lock for too long
         ui_lock_acquire();
 
-        // Handle screen switch requests first
-        if (s_screen_switch_requested) {
+        need_screen_switch = s_screen_switch_requested;
+        if (need_screen_switch) {
             s_screen_switch_requested = false;
-            ESP_LOGI(TAG, "Switching screen to %d from UI task", s_requested_screen);
-            chess_ui_switch_screen(s_requested_screen);
+            requested_screen = s_requested_screen;
         }
 
-        // Handle pending opponent move
-        if (s_move_pending) {
+        need_apply_move = s_move_pending;
+        if (need_apply_move) {
             s_move_pending = false;
-            ESP_LOGI(TAG, "Applying opponent move from UI task");
-            chess_ui_apply_opponent_move(s_move_from_x, s_move_from_y,
-                                        s_move_to_x, s_move_to_y, s_move_promotion);
+            move_from_x = s_move_from_x;
+            move_from_y = s_move_from_y;
+            move_to_x = s_move_to_x;
+            move_to_y = s_move_to_y;
+            move_promotion = s_move_promotion;
         }
 
-        // Handle render requests
-        if (s_render_requested) {
+        need_render = s_render_requested;
+        if (need_render) {
             s_render_requested = false;
-            chess_ui_render();
+        }
+
+        ui_lock_release();
+
+        // Step 2: Process requests - hold the lock while modifying UI state
+        ui_lock_acquire();
+
+        if (need_screen_switch) {
+            ESP_LOGI(TAG, "Switching screen to %d from UI task", requested_screen);
+            chess_ui_switch_screen(requested_screen);
+        }
+
+        if (need_apply_move) {
+            ESP_LOGI(TAG, "Applying opponent move from UI task");
+            chess_ui_apply_opponent_move_locked(move_from_x, move_from_y, move_to_x, move_to_y, move_promotion);
+        }
+
+        if (need_screen_switch) {
+            // Force render when switching screens to make sure new screen appears immediately
+            chess_ui_render_locked_force();
+        } else if (need_render) {
+            chess_ui_render_locked();
         }
 
         // Regular UI update
@@ -179,8 +210,16 @@ static void ui_update_task(void* arg)
 static void bt_chess_state_change(BluetoothChessState state)
 {
     ESP_LOGI(TAG, "Bluetooth state: %d", state);
-    // Request UI update (don't render directly from callback!)
-    s_render_requested = true;
+    // If entering game ready state, also request screen switch
+    if (state == BT_CHESS_STATE_GAME_READY) {
+        ESP_LOGI(TAG, "Game ready! Requesting screen switch to game");
+        s_requested_screen = SCREEN_GAME;
+        s_screen_switch_requested = true;
+        s_render_requested = true;  // Also request render after switching
+    } else {
+        // Just request UI update
+        s_render_requested = true;
+    }
 }
 
 static void bt_chess_device_found(const FoundBluetoothDevice* device, int index)
@@ -201,6 +240,7 @@ static void bt_chess_connected(void)
     // Request screen switch from UI update task
     s_requested_screen = SCREEN_BLUETOOTH_WAITING;
     s_screen_switch_requested = true;
+    s_render_requested = true;  // Also request render after switching
 }
 
 static void bt_chess_disconnected(void)
@@ -209,6 +249,7 @@ static void bt_chess_disconnected(void)
     // Request screen switch from UI update task
     s_requested_screen = SCREEN_BLUETOOTH_MENU;
     s_screen_switch_requested = true;
+    s_render_requested = true;  // Also request render after switching
 }
 
 static void bt_chess_invite_received(void)
@@ -225,6 +266,7 @@ static void bt_chess_invite_accepted(ChessColor local_color)
     // Request screen switch from UI update task
     s_requested_screen = SCREEN_GAME;
     s_screen_switch_requested = true;
+    s_render_requested = true;  // Also request render after switching
 }
 
 static void bt_chess_move_received(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion)

@@ -12,7 +12,6 @@
 
 #define BT_CHESS_TAG "CHESS_BT"
 #define BT_CHESS_SERVER_NAME "XC_CHESS_SERVER"
-#define MAX_FOUND_DEVICES 5
 #define SPP_BUFFER_SIZE 256
 
 static bool s_initialized = false;
@@ -26,6 +25,7 @@ static uint8_t s_target_bda[6] = {0};
 
 static FoundBluetoothDevice s_found_devices[MAX_FOUND_DEVICES];
 static int s_found_device_count = 0;
+static _lock_t s_bluetooth_lock;  // Lock to protect Bluetooth data
 
 static bt_chess_state_callback_t s_state_callback = NULL;
 static bt_chess_device_found_callback_t s_device_found_callback = NULL;
@@ -151,7 +151,7 @@ static void parse_message(const uint8_t* data, size_t len)
     switch (msg_type) {
         case BT_CHESS_MSG_HELLO:
             ESP_LOGI(BT_CHESS_TAG, "Received HELLO message");
-            if (s_role == BT_CHESS_ROLE_HOST && payload_len >= 1) {
+            if (s_role == BT_CHESS_ROLE_GUEST && payload_len >= 1) {
                 s_local_color = payload[0];
                 s_is_my_turn = (s_local_color == COLOR_WHITE);
                 set_state(BT_CHESS_STATE_GAME_READY);
@@ -344,6 +344,7 @@ static void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* pa
                     char hash[7];
                     if (is_chess_device(bdname, hash, sizeof(hash))) {
                         ESP_LOGI(BT_CHESS_TAG, "Found chess device: %s (hash: %s)", bdname, hash);
+                        _lock_acquire(&s_bluetooth_lock);
                         bool already_found = false;
                         for (int j = 0; j < s_found_device_count; j++) {
                             if (memcmp(s_found_devices[j].bda, param->disc_res.bda, 6) == 0) {
@@ -358,10 +359,15 @@ static void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* pa
                             dev->name[BT_CHESS_NAME_LEN - 1] = '\0';
                             strncpy(dev->hash, hash, 6);
                             dev->hash[6] = '\0';
-                            if (s_device_found_callback) {
-                                s_device_found_callback(dev, s_found_device_count);
-                            }
+                            int current_count = s_found_device_count;
                             s_found_device_count++;
+                            _lock_release(&s_bluetooth_lock);
+
+                            if (s_device_found_callback) {
+                                s_device_found_callback(dev, current_count);
+                            }
+                        } else {
+                            _lock_release(&s_bluetooth_lock);
                         }
                     }
                 }
@@ -369,9 +375,12 @@ static void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* pa
             break;
         case ESP_BT_GAP_DISC_STATE_CHANGED_EVT:
             ESP_LOGI(BT_CHESS_TAG, "Discovery state changed: %d", param->disc_st_chg.state);
+            _lock_acquire(&s_bluetooth_lock);
+            int count = s_found_device_count;
+            _lock_release(&s_bluetooth_lock);
             if (param->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STOPPED && s_state == BT_CHESS_STATE_SCANNING) {
                 if (s_device_list_complete_callback) {
-                    s_device_list_complete_callback(s_found_device_count);
+                    s_device_list_complete_callback(count);
                 }
             }
             break;
@@ -410,6 +419,7 @@ void bt_chess_init(void)
         return;
     }
     ESP_LOGI(BT_CHESS_TAG, "Initializing Bluetooth chess module");
+    _lock_init(&s_bluetooth_lock);
     s_state = BT_CHESS_STATE_IDLE;
     s_role = BT_CHESS_ROLE_NONE;
     s_spp_handle = 0;
@@ -626,8 +636,10 @@ bool bt_chess_start_scanning(void)
         ESP_LOGW(BT_CHESS_TAG, "Cannot scan in state: %d", s_state);
         return false;
     }
+    _lock_acquire(&s_bluetooth_lock);
     s_role = BT_CHESS_ROLE_GUEST;
     s_found_device_count = 0;
+    _lock_release(&s_bluetooth_lock);
     char device_name[BT_CHESS_NAME_LEN];
     generate_device_name(device_name, sizeof(device_name));
     esp_bt_gap_set_device_name(device_name);
@@ -636,7 +648,9 @@ bool bt_chess_start_scanning(void)
     if (ret != ESP_OK) {
         ESP_LOGE(BT_CHESS_TAG, "Failed to start discovery: %s", esp_err_to_name(ret));
         set_state(BT_CHESS_STATE_IDLE);
+        _lock_acquire(&s_bluetooth_lock);
         s_role = BT_CHESS_ROLE_NONE;
+        _lock_release(&s_bluetooth_lock);
         return false;
     }
     return true;
@@ -646,23 +660,48 @@ void bt_chess_stop_scanning(void)
 {
     ESP_LOGI(BT_CHESS_TAG, "Stopping scan");
     if (s_state == BT_CHESS_STATE_SCANNING) {
+        ESP_LOGI(BT_CHESS_TAG, "Cancelling discovery...");
         esp_bt_gap_cancel_discovery();
+        ESP_LOGI(BT_CHESS_TAG, "Setting state to idle...");
         set_state(BT_CHESS_STATE_IDLE);
+        ESP_LOGI(BT_CHESS_TAG, "Acquiring bluetooth lock...");
+        _lock_acquire(&s_bluetooth_lock);
+        ESP_LOGI(BT_CHESS_TAG, "Updating role...");
         s_role = BT_CHESS_ROLE_NONE;
+        ESP_LOGI(BT_CHESS_TAG, "Releasing bluetooth lock...");
+        _lock_release(&s_bluetooth_lock);
+        ESP_LOGI(BT_CHESS_TAG, "Scan stopped successfully");
     }
 }
 
 int bt_chess_get_found_device_count(void)
 {
-    return s_found_device_count;
+    _lock_acquire(&s_bluetooth_lock);
+    int count = s_found_device_count;
+    _lock_release(&s_bluetooth_lock);
+    return count;
 }
 
 const FoundBluetoothDevice* bt_chess_get_found_device(int index)
 {
-    if (index < 0 || index >= s_found_device_count) {
-        return NULL;
+    _lock_acquire(&s_bluetooth_lock);
+    const FoundBluetoothDevice* device = NULL;
+    if (index >= 0 && index < s_found_device_count) {
+        device = &s_found_devices[index];
     }
-    return &s_found_devices[index];
+    _lock_release(&s_bluetooth_lock);
+    return device;
+}
+
+int bt_chess_copy_found_devices(FoundBluetoothDevice* buffer, size_t max_count)
+{
+    _lock_acquire(&s_bluetooth_lock);
+    int count = (s_found_device_count < max_count) ? s_found_device_count : max_count;
+    if (buffer && count > 0) {
+        memcpy(buffer, s_found_devices, count * sizeof(FoundBluetoothDevice));
+    }
+    _lock_release(&s_bluetooth_lock);
+    return count;
 }
 
 bool bt_chess_connect_to_device(int index)
@@ -672,16 +711,20 @@ bool bt_chess_connect_to_device(int index)
         ESP_LOGE(BT_CHESS_TAG, "Bluetooth not initialized");
         return false;
     }
+    _lock_acquire(&s_bluetooth_lock);
     if (index < 0 || index >= s_found_device_count) {
+        _lock_release(&s_bluetooth_lock);
         ESP_LOGE(BT_CHESS_TAG, "Invalid device index");
         return false;
     }
     if (s_state != BT_CHESS_STATE_SCANNING) {
+        _lock_release(&s_bluetooth_lock);
         ESP_LOGW(BT_CHESS_TAG, "Cannot connect in state: %d", s_state);
         return false;
     }
-    esp_bt_gap_cancel_discovery();
     memcpy(s_target_bda, s_found_devices[index].bda, 6);
+    _lock_release(&s_bluetooth_lock);
+    esp_bt_gap_cancel_discovery();
     set_state(BT_CHESS_STATE_CONNECTING);
     esp_err_t ret = esp_spp_start_discovery(s_target_bda);
     if (ret != ESP_OK) {

@@ -4,6 +4,9 @@
 #include "chess.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
+
+#define MAX_FOUND_DEVICES 5
 
 // Bluetooth device name prefix and format
 #define BT_CHESS_PREFIX "xc-chess-"
@@ -105,6 +108,9 @@ int bt_chess_get_found_device_count(void);
 
 // Get a found device by index
 const FoundBluetoothDevice* bt_chess_get_found_device(int index);
+
+// Safely copy all found devices to a buffer
+int bt_chess_copy_found_devices(FoundBluetoothDevice* buffer, size_t max_count);
 
 // Connect to a found device
 bool bt_chess_connect_to_device(int index);
