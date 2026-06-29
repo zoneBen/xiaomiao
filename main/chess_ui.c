@@ -13,6 +13,7 @@
 #include <stdio.h>
 
 // Forward declarations
+static void render_splash(void);
 static void render_main_menu(void);
 static void render_bluetooth_menu(void);
 static void render_bluetooth_scan(void);
@@ -75,6 +76,9 @@ typedef struct {
     // Refresh throttling
     int64_t last_render_tick;
     int64_t last_update_time;
+
+    // Splash screen timer
+    int64_t splash_start_time;
 } ChessUIContext;
 
 static ChessUIContext* g_ui = NULL;
@@ -122,11 +126,11 @@ void chess_ui_init(void)
     }
     chess_game_init(g_game);
 
-    // Initialize UI state
-    g_ui->current_screen = SCREEN_MAIN_MENU;
-    g_ui->previous_screen = SCREEN_MAIN_MENU;
+    // Initialize UI state - start with splash screen
+    g_ui->current_screen = SCREEN_SPLASH;
+    g_ui->previous_screen = SCREEN_SPLASH;
     g_ui->menu_index = 0;
-    g_ui->menu_count = 3;
+    g_ui->menu_count = 0;
     g_ui->cursor_x = 0;
     g_ui->cursor_y = 0;
     g_ui->selected_x = -1;
@@ -166,6 +170,9 @@ void chess_ui_init(void)
 
     // Initialize last render time
     g_ui->last_render_tick = esp_timer_get_time() - 100000;  // Ensure first render happens
+
+    // Record splash screen start time
+    g_ui->splash_start_time = esp_timer_get_time();
 
     ESP_LOGI(TAG, "Chess UI initialized");
 }
@@ -218,6 +225,9 @@ void chess_ui_switch_screen(ChessScreen screen)
     g_ui->menu_index = 0;
 
     switch (screen) {
+        case SCREEN_SPLASH:
+            g_ui->menu_count = 0;
+            break;
         case SCREEN_MAIN_MENU:
             g_ui->menu_count = 3;
             break;
@@ -415,6 +425,11 @@ void chess_ui_handle_key(KeyCode key)
     ESP_LOGI(TAG, "ui_lock acquired");
 
     switch (g_ui->current_screen) {
+        case SCREEN_SPLASH:
+            // Any key goes to main menu
+            sound_play(SOUND_KEY_CLICK);
+            chess_ui_switch_screen(SCREEN_MAIN_MENU);
+            break;
         case SCREEN_MAIN_MENU:
             if (key == KEY_UP) {
                 if (g_ui->menu_index > 0) {
@@ -779,6 +794,17 @@ void chess_ui_update(void)
 {
     if (!g_ui) return;
 
+    // Check if we're on splash screen and need to auto-advance
+    if (g_ui->current_screen == SCREEN_SPLASH) {
+        int64_t now = esp_timer_get_time();
+        // Show splash for 3 seconds (3,000,000 microseconds)
+        if (now - g_ui->splash_start_time > 3000000) {
+            chess_ui_switch_screen(SCREEN_MAIN_MENU);
+            // Force render to show the menu immediately
+            chess_ui_render_locked_force();
+        }
+    }
+
     // Update message timer
     if (g_ui->show_message) {
         if (g_ui->message_timer > 0) {
@@ -811,6 +837,9 @@ static void chess_ui_render_internal(bool force)
 
     // Render current screen
     switch (g_ui->current_screen) {
+        case SCREEN_SPLASH:
+            render_splash();
+            break;
         case SCREEN_MAIN_MENU:
             render_main_menu();
             break;
@@ -1383,6 +1412,98 @@ static void render_game(void)
     }
 }
 
+
+static void render_splash(void)
+{
+    // Draw background gradient - dark to light brown
+    for (int y = 0; y < TFT_HEIGHT; y++) {
+        uint8_t r = 0x10 + (y * 0x20 / TFT_HEIGHT);
+        uint8_t g = 0x10 + (y * 0x18 / TFT_HEIGHT);
+        uint8_t b = 0x08 + (y * 0x10 / TFT_HEIGHT);
+        uint16_t color = RGB_TO_RGB565(r, g, b);
+        for (int x = 0; x < TFT_WIDTH; x++) {
+            tft_sprite_draw_pixel(&g_ui->sprite, x, y, color);
+        }
+    }
+
+    // Draw chess pieces decorative border
+    // King symbol at top-left
+    const uint8_t king_pattern[] = {
+        0x00, 0x18, 0x18, 0x3C, 0x3C, 0x7E, 0x7E, 0xDB,
+        0x7E, 0x3C, 0x3C, 0x7E, 0x7E, 0x3C, 0x18, 0x00
+    };
+    for (int y = 0; y < 16; y++) {
+        for (int x = 0; x < 8; x++) {
+            if (king_pattern[y] & (1 << (7 - x))) {
+                tft_sprite_draw_pixel(&g_ui->sprite, x + 4, y + 4, TFT_GOLD);
+                tft_sprite_draw_pixel(&g_ui->sprite, TFT_WIDTH - x - 5, y + 4, TFT_GOLD);
+                tft_sprite_draw_pixel(&g_ui->sprite, x + 4, TFT_HEIGHT - y - 5, TFT_GOLD);
+                tft_sprite_draw_pixel(&g_ui->sprite, TFT_WIDTH - x - 5, TFT_HEIGHT - y - 5, TFT_GOLD);
+            }
+        }
+    }
+
+    // Draw title "CHESS" with scale 3
+    const char* title = "CHESS";
+    int title_x = (TFT_WIDTH - tft_sprite_text_width(title, 3)) / 2;
+    int title_y = 35;
+
+    // Draw outline first for better visibility
+    for (int i = 0; title[i]; i++) {
+        char c = title[i];
+        tft_sprite_draw_char(&g_ui->sprite, title_x + i * 18 - 1, title_y - 1, c, TFT_BLACK, 3);
+        tft_sprite_draw_char(&g_ui->sprite, title_x + i * 18 + 1, title_y - 1, c, TFT_BLACK, 3);
+        tft_sprite_draw_char(&g_ui->sprite, title_x + i * 18 - 1, title_y + 1, c, TFT_BLACK, 3);
+        tft_sprite_draw_char(&g_ui->sprite, title_x + i * 18 + 1, title_y + 1, c, TFT_BLACK, 3);
+    }
+    // Draw main title
+    for (int i = 0; title[i]; i++) {
+        tft_sprite_draw_char(&g_ui->sprite, title_x + i * 18, title_y, title[i], TFT_GOLD, 3);
+    }
+
+    // Draw subtitle
+    const char* subtitle = "XiaoMiao";
+    int subtitle_x = (TFT_WIDTH - tft_sprite_text_width(subtitle, 2)) / 2;
+    tft_sprite_draw_char(&g_ui->sprite, subtitle_x - 1, 75, 'X', TFT_BLACK, 2);
+    tft_sprite_draw_char(&g_ui->sprite, subtitle_x + 1, 75, 'X', TFT_BLACK, 2);
+    tft_sprite_draw_char(&g_ui->sprite, subtitle_x, 75 - 1, 'X', TFT_BLACK, 2);
+    tft_sprite_draw_char(&g_ui->sprite, subtitle_x, 75 + 1, 'X', TFT_BLACK, 2);
+    int text_x = subtitle_x;
+    const char* text = subtitle;
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, 75, *text, TFT_YELLOW, 2);
+        text_x += 12;
+        text++;
+    }
+
+    // Draw press any key prompt
+    const char* prompt = "Press any key";
+    int prompt_x = (TFT_WIDTH - tft_sprite_text_width(prompt, 1)) / 2;
+    text_x = prompt_x;
+    text = prompt;
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, 110, *text, TFT_LIGHTGREY, 1);
+        text_x += 6;
+        text++;
+    }
+
+    // Draw decorative chessboard pattern at bottom
+    int board_y = TFT_HEIGHT - 20;
+    for (int y = 0; y < 16; y++) {
+        for (int x = 0; x < 32; x++) {
+            if (((x / 4) + (y / 4)) % 2 == 0) {
+                tft_sprite_draw_pixel(&g_ui->sprite, x, board_y + y, COLOR_LIGHT_SQUARE);
+            } else {
+                tft_sprite_draw_pixel(&g_ui->sprite, x, board_y + y, COLOR_DARK_SQUARE);
+            }
+            if (((x / 4) + (y / 4) + 2) % 2 == 0) {
+                tft_sprite_draw_pixel(&g_ui->sprite, TFT_WIDTH - x - 1, board_y + y, COLOR_LIGHT_SQUARE);
+            } else {
+                tft_sprite_draw_pixel(&g_ui->sprite, TFT_WIDTH - x - 1, board_y + y, COLOR_DARK_SQUARE);
+            }
+        }
+    }
+}
 
 static void render_message(void)
 {

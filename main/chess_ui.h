@@ -6,6 +6,7 @@
 #include <stdbool.h>
 
 typedef enum {
+    SCREEN_SPLASH,
     SCREEN_MAIN_MENU,
     SCREEN_BLUETOOTH_MENU,
     SCREEN_BLUETOOTH_SCAN,
