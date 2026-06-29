@@ -165,7 +165,7 @@ void sound_play(SoundType sound)
             queue_sequence(effect_capture, 2, 60);
             break;
         case SOUND_CHECK:
-            queue_sequence(effect_check, 3, 55);
+            queue_sequence(effect_check, 7, 55);
             break;
         case SOUND_CHECKMATE:
             queue_sequence(effect_checkmate, 3, 70);
