@@ -20,6 +20,7 @@ static void render_bluetooth_scan(void);
 static void render_bluetooth_waiting(void);
 static void render_game(void);
 static void render_exit_confirm(void);
+static void render_about(void);
 static void render_message(void);
 
 static const char* TAG = "chess_ui";
@@ -88,7 +89,8 @@ static ChessGame* g_game = NULL;
 static const char* main_menu_items[] = {
     "Local Game",
     "Bluetooth Game",
-    "Sound: Off"
+    "Sound: Off",
+    "About"
 };
 
 // Menu items for Bluetooth menu
@@ -229,7 +231,7 @@ void chess_ui_switch_screen(ChessScreen screen)
             g_ui->menu_count = 0;
             break;
         case SCREEN_MAIN_MENU:
-            g_ui->menu_count = 3;
+            g_ui->menu_count = 4;
             break;
         case SCREEN_BLUETOOTH_MENU:
             g_ui->menu_count = 3;
@@ -280,6 +282,9 @@ void chess_ui_switch_screen(ChessScreen screen)
             break;
         case SCREEN_EXIT_CONFIRM:
             g_ui->menu_count = 2;
+            break;
+        case SCREEN_ABOUT:
+            g_ui->menu_count = 0;
             break;
     }
 }
@@ -461,9 +466,19 @@ void chess_ui_handle_key(KeyCode key)
                     if (g_ui->sound_enabled) {
                         sound_play(SOUND_MENU_SELECT);
                     }
+                } else if (g_ui->menu_index == 3) {
+                    // About
+                    sound_play(SOUND_MENU_SELECT);
+                    chess_ui_switch_screen(SCREEN_ABOUT);
                 }
             } else if (key == KEY_B) {
                 sound_play(SOUND_KEY_CLICK);
+            }
+            break;
+        case SCREEN_ABOUT:
+            if (key == KEY_B || key == KEY_A) {
+                sound_play(SOUND_KEY_CLICK);
+                chess_ui_switch_screen(SCREEN_MAIN_MENU);
             }
             break;
 
@@ -870,6 +885,9 @@ static void chess_ui_render_internal(bool force)
         case SCREEN_EXIT_CONFIRM:
             render_exit_confirm();
             break;
+        case SCREEN_ABOUT:
+            render_about();
+            break;
     }
 
     // Render message
@@ -912,8 +930,8 @@ static void render_main_menu(void)
     }
 
     // Menu items
-    for (int i = 0; i < 3; i++) {
-        int y = 40 + i * 25;
+    for (int i = 0; i < 4; i++) {
+        int y = 35 + i * 22;
         bool is_selected = (i == g_ui->menu_index);
 
         if (is_selected) {
@@ -1514,6 +1532,151 @@ static void render_splash(void)
                 tft_sprite_draw_pixel(&g_ui->sprite, TFT_WIDTH - x - 1, board_y + y, COLOR_DARK_SQUARE);
             }
         }
+    }
+}
+
+static void render_about(void)
+{
+    // Draw gradient background
+    for (int y = 0; y < TFT_HEIGHT; y++) {
+        uint8_t r = 0x18 + (y * 0x18 / TFT_HEIGHT);
+        uint8_t g = 0x14 + (y * 0x14 / TFT_HEIGHT);
+        uint8_t b = 0x20 + (y * 0x10 / TFT_HEIGHT);
+        uint16_t color = RGB_TO_RGB565(r, g, b);
+        for (int x = 0; x < TFT_WIDTH; x++) {
+            tft_sprite_draw_pixel(&g_ui->sprite, x, y, color);
+        }
+    }
+
+    // Draw decorative chess pieces in corners
+    const uint8_t small_king[] = {
+        0x00, 0x18, 0x18, 0x3C, 0x3C, 0x7E, 0x7E, 0xDB,
+        0x7E, 0x3C, 0x3C, 0x7E, 0x7E, 0x3C, 0x18, 0x00
+    };
+    for (int y = 0; y < 16; y++) {
+        for (int x = 0; x < 8; x++) {
+            if (small_king[y] & (1 << (7 - x))) {
+                tft_sprite_draw_pixel(&g_ui->sprite, x + 8, y + 8, TFT_GOLD);
+                tft_sprite_draw_pixel(&g_ui->sprite, TFT_WIDTH - x - 9, y + 8, TFT_GOLD);
+                tft_sprite_draw_pixel(&g_ui->sprite, x + 8, TFT_HEIGHT - y - 9, TFT_GOLD);
+                tft_sprite_draw_pixel(&g_ui->sprite, TFT_WIDTH - x - 9, TFT_HEIGHT - y - 9, TFT_GOLD);
+            }
+        }
+    }
+
+    // Title with outline
+    const char* title = "About";
+    int title_x = (TFT_WIDTH - tft_sprite_text_width(title, 2)) / 2;
+    int title_y = 12;
+    // Draw outline
+    for (int i = 0; title[i]; i++) {
+        tft_sprite_draw_char(&g_ui->sprite, title_x + i * 12 - 1, title_y - 1, title[i], TFT_BLACK, 2);
+        tft_sprite_draw_char(&g_ui->sprite, title_x + i * 12 + 1, title_y - 1, title[i], TFT_BLACK, 2);
+        tft_sprite_draw_char(&g_ui->sprite, title_x + i * 12 - 1, title_y + 1, title[i], TFT_BLACK, 2);
+        tft_sprite_draw_char(&g_ui->sprite, title_x + i * 12 + 1, title_y + 1, title[i], TFT_BLACK, 2);
+    }
+    // Draw main title
+    for (int i = 0; title[i]; i++) {
+        tft_sprite_draw_char(&g_ui->sprite, title_x + i * 12, title_y, title[i], TFT_GOLD, 2);
+    }
+
+    // Draw decorative double border
+    tft_sprite_draw_rect(&g_ui->sprite, 8, 32, TFT_WIDTH - 16, TFT_HEIGHT - 52, TFT_LIGHTGREY);
+    tft_sprite_draw_rect(&g_ui->sprite, 10, 34, TFT_WIDTH - 20, TFT_HEIGHT - 56, TFT_NAVY);
+
+    // Draw inner box background
+    tft_sprite_fill_rect(&g_ui->sprite, 12, 36, TFT_WIDTH - 24, TFT_HEIGHT - 60, COLOR_DIALOG);
+
+    // Developer info with icons
+    int y = 48;
+
+    // Developer label and name on same line
+    const char* dev_label = "By: ";
+    const char* dev_name = "bilibili Zoneben";
+    int label_width = tft_sprite_text_width(dev_label, 1);
+    int name_width = tft_sprite_text_width(dev_name, 1);
+    int total_width = label_width + name_width;
+    int start_x = (TFT_WIDTH - total_width) / 2;
+
+    // Draw label
+    int text_x = start_x;
+    const char* text = dev_label;
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, y, *text, TFT_LIGHTGREY, 1);
+        text_x += 6;
+        text++;
+    }
+
+    // Draw name with highlight
+    int name_x = start_x + label_width;
+    tft_sprite_fill_rect(&g_ui->sprite, name_x - 2, y - 2, name_width + 4, 12, TFT_NAVY);
+    text_x = name_x;
+    text = dev_name;
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, y, *text, TFT_YELLOW, 1);
+        text_x += 6;
+        text++;
+    }
+    y += 22;
+
+    // Divider line - use fill_rect to draw a thin horizontal line
+    tft_sprite_fill_rect(&g_ui->sprite, 20, y, TFT_WIDTH - 40, 1, TFT_LIGHTGREY);
+    y += 16;
+
+    // QQ label and number on same line
+    const char* qq_label = "QQ: ";
+    const char* qq_num = "809468582";
+    int qq_label_width = tft_sprite_text_width(qq_label, 1);
+    int qq_num_width = tft_sprite_text_width(qq_num, 1);
+    int qq_total_width = qq_label_width + qq_num_width;
+    int qq_start_x = (TFT_WIDTH - qq_total_width) / 2;
+
+    // Draw QQ label
+    text_x = qq_start_x;
+    text = qq_label;
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, y, *text, TFT_LIGHTGREY, 1);
+        text_x += 6;
+        text++;
+    }
+
+    // Draw QQ number with highlight
+    int qq_num_x = qq_start_x + qq_label_width;
+    tft_sprite_fill_rect(&g_ui->sprite, qq_num_x - 2, y - 2, qq_num_width + 4, 12, TFT_NAVY);
+    text_x = qq_num_x;
+    text = qq_num;
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, y, *text, TFT_YELLOW, 1);
+        text_x += 6;
+        text++;
+    }
+    y += 20;
+
+    // Draw some decorative stars
+    int star_positions[][2] = {{15, 60}, {TFT_WIDTH - 20, 60}, {15, 90}, {TFT_WIDTH - 20, 90}};
+    for (int i = 0; i < 4; i++) {
+        int sx = star_positions[i][0];
+        int sy = star_positions[i][1];
+        tft_sprite_draw_pixel(&g_ui->sprite, sx, sy - 1, TFT_GOLD);
+        tft_sprite_draw_pixel(&g_ui->sprite, sx - 1, sy, TFT_GOLD);
+        tft_sprite_draw_pixel(&g_ui->sprite, sx, sy, TFT_GOLD);
+        tft_sprite_draw_pixel(&g_ui->sprite, sx + 1, sy, TFT_GOLD);
+        tft_sprite_draw_pixel(&g_ui->sprite, sx, sy + 1, TFT_GOLD);
+    }
+
+    // Back hint with button-like background
+    const char* hint = "B: Back";
+    int hint_x = (TFT_WIDTH - tft_sprite_text_width(hint, 1)) / 2;
+    int hint_y = TFT_HEIGHT - 18;
+    // Draw button background
+    tft_sprite_fill_rect(&g_ui->sprite, hint_x - 6, hint_y - 3, tft_sprite_text_width(hint, 1) + 12, 14, TFT_NAVY);
+    tft_sprite_draw_rect(&g_ui->sprite, hint_x - 6, hint_y - 3, tft_sprite_text_width(hint, 1) + 12, 14, TFT_LIGHTGREY);
+    text_x = hint_x;
+    text = hint;
+    while (*text) {
+        tft_sprite_draw_char(&g_ui->sprite, text_x, hint_y, *text, TFT_WHITE, 1);
+        text_x += 6;
+        text++;
     }
 }
 
