@@ -333,6 +333,12 @@ void chess_ui_apply_opponent_move_locked(int from_x, int from_y, int to_x, int t
         // Check for game over
         if (chess_game_is_game_over(g_game)) {
             sound_play(SOUND_CHECKMATE);
+        } else {
+            // Check for check
+            ChessColor current_turn = chess_game_get_current_turn(g_game);
+            if (chess_game_is_in_check(g_game, current_turn)) {
+                sound_play(SOUND_CHECK);
+            }
         }
     }
 
@@ -715,6 +721,12 @@ void chess_ui_handle_key(KeyCode key)
                                 // Send game over
                                 if (is_bluetooth_game) {
                                     bt_chess_send_game_over(winner);
+                                }
+                            } else {
+                                // Check for check
+                                ChessColor current_turn = chess_game_get_current_turn(g_game);
+                                if (chess_game_is_in_check(g_game, current_turn)) {
+                                    sound_play(SOUND_CHECK);
                                 }
                             }
 
