@@ -35,7 +35,6 @@ typedef enum {
 
 static CurrentGame s_current_game = GAME_SELECTOR;
 static int s_game_selector_index = 0;
-static bool s_game_selector_initialized = false;
 
 // Flags to request UI updates from Bluetooth callbacks
 static volatile bool s_render_requested = false;

@@ -1,8 +1,5 @@
 #include "xiangqi.h"
 #include <string.h>
-#include "esp_log.h"
-
-static const char* TAG = "Xiangqi";
 
 // ==================== 辅助函数 ====================
 

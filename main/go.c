@@ -1,8 +1,5 @@
 #include "go.h"
 #include <string.h>
-#include "esp_log.h"
-
-static const char* TAG = "Go";
 
 bool go_is_valid_position(int x, int y)
 {
@@ -161,7 +158,6 @@ bool go_place_piece(GoGame* game, int x, int y)
     game->ko_x = -1;
     game->ko_y = -1;
     if (captured == 1) {
-        bool is_ko = true;
         GoGame check_game = *game;
         check_game.board[captured_y][captured_x] = opponent;
         if (go_count_liberties(&check_game, x, y, NULL) == 0) {

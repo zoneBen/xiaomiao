@@ -1,8 +1,5 @@
 #include "junqi.h"
 #include <string.h>
-#include "esp_log.h"
-
-static const char* TAG = "JunQi";
 
 // 检查位置是否有效
 bool junqi_is_valid_position(int x, int y)
