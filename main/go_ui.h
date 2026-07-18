@@ -2,6 +2,7 @@
 #define GO_UI_H
 
 #include "go.h"
+#include "chess_ui.h"
 #include "tft_display.h"
 #include "ui_lock.h"
 

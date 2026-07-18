@@ -344,6 +344,61 @@ void tft_sprite_fill_rect(TFT_Sprite* sprite, int16_t x, int16_t y, int16_t w, i
     }
 }
 
+void tft_sprite_draw_line(TFT_Sprite* sprite, int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color)
+{
+    if (!sprite || !sprite->created) return;
+
+    int16_t dx = abs(x1 - x0);
+    int16_t dy = abs(y1 - y0);
+    int16_t sx = x0 < x1 ? 1 : -1;
+    int16_t sy = y0 < y1 ? 1 : -1;
+    int16_t err = dx - dy;
+
+    while (1) {
+        sprite_set_pixel(sprite, x0, y0, color);
+        if (x0 == x1 && y0 == y1) break;
+        int16_t e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; x0 += sx; }
+        if (e2 < dx) { err += dx; y0 += sy; }
+    }
+}
+
+void tft_sprite_draw_circle(TFT_Sprite* sprite, int16_t x0, int16_t y0, int16_t r, uint16_t color)
+{
+    if (!sprite || !sprite->created) return;
+
+    int16_t f = 1 - r;
+    int16_t ddF_x = 1;
+    int16_t ddF_y = -2 * r;
+    int16_t x = 0;
+    int16_t y = r;
+
+    sprite_set_pixel(sprite, x0, y0 + r, color);
+    sprite_set_pixel(sprite, x0, y0 - r, color);
+    sprite_set_pixel(sprite, x0 + r, y0, color);
+    sprite_set_pixel(sprite, x0 - r, y0, color);
+
+    while (x < y) {
+        if (f >= 0) {
+            y--;
+            ddF_y += 2;
+            f += ddF_y;
+        }
+        x++;
+        ddF_x += 2;
+        f += ddF_x;
+
+        sprite_set_pixel(sprite, x0 + x, y0 + y, color);
+        sprite_set_pixel(sprite, x0 - x, y0 + y, color);
+        sprite_set_pixel(sprite, x0 + x, y0 - y, color);
+        sprite_set_pixel(sprite, x0 - x, y0 - y, color);
+        sprite_set_pixel(sprite, x0 + y, y0 + x, color);
+        sprite_set_pixel(sprite, x0 - y, y0 + x, color);
+        sprite_set_pixel(sprite, x0 + y, y0 - x, color);
+        sprite_set_pixel(sprite, x0 - y, y0 - x, color);
+    }
+}
+
 void tft_sprite_draw_rect(TFT_Sprite* sprite, int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
 {
     if (!sprite || !sprite->created) return;
