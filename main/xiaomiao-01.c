@@ -12,8 +12,30 @@
 #include "ui_lock.h"
 #include "tft_display.h"
 #include "sound.h"
+#include "xiangqi.h"
+#include "xiangqi_ui.h"
+#include "gomoku.h"
+#include "gomoku_ui.h"
+#include "go.h"
+#include "go_ui.h"
+#include "junqi.h"
+#include "junqi_ui.h"
 
 static const char* TAG = "xiaomiao";
+
+// 游戏选择
+typedef enum {
+    GAME_SELECTOR,
+    GAME_CHESS,
+    GAME_XIANGQI,
+    GAME_GOMOKU,
+    GAME_GO,
+    GAME_JUNQI,
+} CurrentGame;
+
+static CurrentGame s_current_game = GAME_SELECTOR;
+static int s_game_selector_index = 0;
+static bool s_game_selector_initialized = false;
 
 // Flags to request UI updates from Bluetooth callbacks
 static volatile bool s_render_requested = false;
@@ -31,6 +53,47 @@ static volatile ChessPieceType s_move_promotion = PIECE_NONE;
 // Structure to hold pending game sync
 static volatile bool s_sync_pending = false;
 static ChessGame s_synced_game;
+
+static TFT_Sprite s_sprite;
+static bool s_sprite_created = false;
+
+static void render_game_selector(void)
+{
+    // 画背景
+    tft_sprite_fill_screen(&s_sprite, COLOR_BACKGROUND);
+
+    // 标题
+    const char* title = "SELECT GAME";
+    int title_x = (TFT_WIDTH - tft_sprite_text_width(title, 1)) / 2;
+    int x = title_x;
+    for (const char* p = title; *p; p++) {
+        tft_sprite_draw_char(&s_sprite, x, 8, *p, TFT_YELLOW, 1);
+        x += 6;
+    }
+
+    // 游戏列表
+    const char* games[] = {"1. Chess", "2. XiangQi", "3. Gomoku", "4. Go", "5. JunQi"};
+    for (int i = 0; i < 5; i++) {
+        int y = 20 + i * 20;
+        bool selected = (i == s_game_selector_index);
+        if (selected) {
+            tft_sprite_fill_rect(&s_sprite, 15, y, TFT_WIDTH - 30, 16, TFT_NAVY);
+        }
+        x = 20;
+        for (const char* p = games[i]; *p; p++) {
+            tft_sprite_draw_char(&s_sprite, x, y + 4, *p, selected ? TFT_YELLOW : TFT_WHITE, 1);
+            x += 6;
+        }
+    }
+
+    // 提示
+    const char* hint = "A:Select";
+    x = (TFT_WIDTH - tft_sprite_text_width(hint, 1)) / 2;
+    for (const char* p = hint; *p; p++) {
+        tft_sprite_draw_char(&s_sprite, x, 110, *p, TFT_LIGHTGREY, 1);
+        x += 6;
+    }
+}
 
 
 #define KEY_UP_GPIO 2
@@ -113,7 +176,63 @@ static void key_scan_task(void* arg)
                         ESP_LOGI(TAG, ">>> Key %s (GPIO%d) PRESSED! raw=%d",
                                  keys[i].name, keys[i].gpio, raw);
                         sound_play(SOUND_KEY_CLICK);
-                        chess_ui_handle_key(keys[i].key);
+
+                        if (s_current_game == GAME_SELECTOR) {
+                            // 游戏选择菜单
+                            if (keys[i].key == KEY_UP) {
+                                if (s_game_selector_index > 0) s_game_selector_index--;
+                            } else if (keys[i].key == KEY_DOWN) {
+                                if (s_game_selector_index < 4) s_game_selector_index++;
+                            } else if (keys[i].key == KEY_A) {
+                                if (s_game_selector_index == 0) {
+                                    // 国际象棋
+                                    s_current_game = GAME_CHESS;
+                                    ui_lock_acquire();
+                                    chess_ui_init();
+                                    chess_ui_switch_screen(SCREEN_MAIN_MENU);
+                                    ui_lock_release();
+                                } else if (s_game_selector_index == 1) {
+                                    // 中国象棋
+                                    s_current_game = GAME_XIANGQI;
+                                    ui_lock_acquire();
+                                    xiangqi_ui_init();
+                                    xiangqi_ui_switch_to_game();
+                                    ui_lock_release();
+                                } else if (s_game_selector_index == 2) {
+                                    // 五子棋
+                                    s_current_game = GAME_GOMOKU;
+                                    ui_lock_acquire();
+                                    gomoku_ui_init();
+                                    gomoku_ui_switch_to_game();
+                                    ui_lock_release();
+                                } else if (s_game_selector_index == 3) {
+                                    // 围棋
+                                    s_current_game = GAME_GO;
+                                    ui_lock_acquire();
+                                    go_ui_init();
+                                    go_ui_switch_to_game();
+                                    ui_lock_release();
+                                } else if (s_game_selector_index == 4) {
+                                    // 军棋
+                                    s_current_game = GAME_JUNQI;
+                                    ui_lock_acquire();
+                                    junqi_ui_init();
+                                    junqi_ui_switch_to_game();
+                                    ui_lock_release();
+                                }
+                            }
+                            s_render_requested = true;
+                        } else if (s_current_game == GAME_CHESS) {
+                            chess_ui_handle_key(keys[i].key);
+                        } else if (s_current_game == GAME_XIANGQI) {
+                            xiangqi_ui_handle_key(keys[i].key);
+                        } else if (s_current_game == GAME_GOMOKU) {
+                            gomoku_ui_handle_key(keys[i].key);
+                        } else if (s_current_game == GAME_GO) {
+                            go_ui_handle_key(keys[i].key);
+                        } else if (s_current_game == GAME_JUNQI) {
+                            junqi_ui_handle_key(keys[i].key);
+                        }
                     } else {
                         ESP_LOGI(TAG, "<<< Key %s (GPIO%d) released",
                                  keys[i].name, keys[i].gpio);
@@ -197,31 +316,83 @@ static void ui_update_task(void* arg)
         ui_lock_acquire();
         // ESP_LOGI(TAG, "UI update task: processing requests");
 
-        if (need_screen_switch) {
-            ESP_LOGI(TAG, "Switching screen to %d from UI task", requested_screen);
-            chess_ui_switch_screen(requested_screen);
-        }
+        if (s_current_game == GAME_SELECTOR) {
+            // 游戏选择菜单
+            render_game_selector();
+            tft_sprite_push(&s_sprite, 0, 0);
+        } else if (s_current_game == GAME_CHESS) {
+            // 国际象棋
+            if (need_screen_switch) {
+                ESP_LOGI(TAG, "Switching screen to %d from UI task", requested_screen);
+                chess_ui_switch_screen(requested_screen);
+            }
 
-        if (need_apply_move) {
-            ESP_LOGI(TAG, "Applying opponent move from UI task");
-            chess_ui_apply_opponent_move_locked(move_from_x, move_from_y, move_to_x, move_to_y, move_promotion);
-        }
+            if (need_apply_move) {
+                ESP_LOGI(TAG, "Applying opponent move from UI task");
+                chess_ui_apply_opponent_move_locked(move_from_x, move_from_y, move_to_x, move_to_y, move_promotion);
+            }
 
-        if (need_apply_sync) {
-            ESP_LOGI(TAG, "Applying game sync from UI task (locked version)");
-            // 直接调用锁内版本，避免递归获取锁导致死锁
-            chess_ui_update_game_locked(&synced_game);
-        }
+            if (need_apply_sync) {
+                ESP_LOGI(TAG, "Applying game sync from UI task (locked version)");
+                chess_ui_update_game_locked(&synced_game);
+            }
 
-        if (need_screen_switch) {
-            // Force render when switching screens to make sure new screen appears immediately
-            chess_ui_render_locked_force();
-        } else if (need_render) {
-            chess_ui_render_locked();
-        }
+            if (need_screen_switch) {
+                chess_ui_render_locked_force();
+            } else if (need_render) {
+                chess_ui_render_locked();
+            }
 
-        // Regular UI update
-        chess_ui_update();
+            chess_ui_update();
+        } else if (s_current_game == GAME_XIANGQI) {
+            // 中国象棋
+            if (xiangqi_ui_should_exit()) {
+                // 返回游戏选择菜单
+                s_current_game = GAME_SELECTOR;
+                s_game_selector_index = 0;
+            } else {
+                xiangqi_ui_update();
+                if (need_render) {
+                    xiangqi_ui_render();
+                }
+            }
+        } else if (s_current_game == GAME_GOMOKU) {
+            // 五子棋
+            if (gomoku_ui_should_exit()) {
+                // 返回游戏选择菜单
+                s_current_game = GAME_SELECTOR;
+                s_game_selector_index = 0;
+            } else {
+                gomoku_ui_update();
+                if (need_render) {
+                    gomoku_ui_render();
+                }
+            }
+        } else if (s_current_game == GAME_GO) {
+            // 围棋
+            if (go_ui_should_exit()) {
+                // 返回游戏选择菜单
+                s_current_game = GAME_SELECTOR;
+                s_game_selector_index = 0;
+            } else {
+                go_ui_update();
+                if (need_render) {
+                    go_ui_render();
+                }
+            }
+        } else if (s_current_game == GAME_JUNQI) {
+            // 军棋
+            if (junqi_ui_should_exit()) {
+                // 返回游戏选择菜单
+                s_current_game = GAME_SELECTOR;
+                s_game_selector_index = 0;
+            } else {
+                junqi_ui_update();
+                if (need_render) {
+                    junqi_ui_render();
+                }
+            }
+        }
 
         ui_lock_release();
         // ESP_LOGI(TAG, "UI update task: released lock 2");
@@ -358,12 +529,13 @@ void app_main(void)
     ESP_LOGI(TAG, "Initialize UI lock");
     ui_lock_init();
 
-    ESP_LOGI(TAG, "Initialize chess UI");
-    ui_lock_acquire();
-    chess_ui_init();
-    ui_lock_release();
+    ESP_LOGI(TAG, "Create sprite for menu");
+    if (tft_sprite_create(&s_sprite, TFT_WIDTH, TFT_HEIGHT) == ESP_OK) {
+        s_sprite_created = true;
+    }
 
-    chess_ui_render();
+    ESP_LOGI(TAG, "Initialize chess UI (will be used when selected)");
+    // chess_ui_init() 会在选择游戏时调用
 
     xTaskCreate(key_scan_task, "KeyScan", 4096, NULL, 5, NULL);
     xTaskCreate(ui_update_task, "UIUpdate", 4096, NULL, 4, NULL);
