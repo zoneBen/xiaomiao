@@ -8,8 +8,21 @@
 
 #define MAX_FOUND_DEVICES 5
 
+// 游戏类型枚举
+typedef enum {
+    BT_GAME_CHESS = 0,     // 国际象棋
+    BT_GAME_XIANGQI,       // 中国象棋
+    BT_GAME_GOMOKU,        // 五子棋
+    BT_GAME_GO,            // 围棋
+    BT_GAME_JUNQI,         // 军棋
+} BluetoothGameType;
+
 // Bluetooth device name prefix and format
 #define BT_CHESS_PREFIX "xc-chess-"
+#define BT_XIANGQI_PREFIX "xc-xiangqi-"
+#define BT_GOMOKU_PREFIX "xc-gomoku-"
+#define BT_GO_PREFIX "xc-go-"
+#define BT_JUNQI_PREFIX "xc-junqi-"
 #define BT_CHESS_NAME_LEN 32
 
 // Bluetooth message types (similar to network messages)
@@ -78,6 +91,12 @@ typedef void (*bt_chess_move_received_callback_t)(int from_x, int from_y, int to
 typedef void (*bt_chess_game_over_callback_t)(ChessColor winner);
 typedef void (*bt_chess_chat_received_callback_t)(const char* message);
 typedef void (*bt_chess_sync_received_callback_t)(const ChessGame* game);
+
+// 设置当前游戏类型（在init之前或之后调用都可以）
+void bt_chess_set_game_type(BluetoothGameType game_type);
+
+// 获取当前游戏类型
+BluetoothGameType bt_chess_get_game_type(void);
 
 // Initialize Bluetooth chess module
 void bt_chess_init(void);

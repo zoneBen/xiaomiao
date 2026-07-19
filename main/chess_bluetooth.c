@@ -13,11 +13,13 @@
 
 #define BT_CHESS_TAG "CHESS_BT"
 #define BT_CHESS_SERVER_NAME "XC_CHESS_SERVER"
+#define BT_XIANGQI_SERVER_NAME "XC_XIANGQI_SERVER"
 #define SPP_BUFFER_SIZE 256
 
 static bool s_initialized = false;
 static BluetoothChessState s_state = BT_CHESS_STATE_IDLE;
 static BluetoothChessRole s_role = BT_CHESS_ROLE_NONE;
+static BluetoothGameType s_game_type = BT_GAME_CHESS;  // 默认是国际象棋
 static ChessColor s_local_color = COLOR_WHITE;
 static bool s_is_my_turn = true;
 static uint32_t s_spp_handle = 0;
@@ -84,29 +86,63 @@ static void generate_hash_from_bda(const uint8_t* bda, char* hash, size_t hash_s
     }
 }
 
-static void generate_device_name(char* name, size_t name_size)
+static const char* get_current_prefix(void)
 {
-    const uint8_t* bda = esp_bt_dev_get_address();
-    char hash[7];
-    if (bda == NULL) {
-        snprintf(name, name_size, "%s000000", BT_CHESS_PREFIX);
-        return;
+    switch (s_game_type) {
+        case BT_GAME_XIANGQI:
+            return BT_XIANGQI_PREFIX;
+        case BT_GAME_GOMOKU:
+            return BT_GOMOKU_PREFIX;
+        case BT_GAME_GO:
+            return BT_GO_PREFIX;
+        case BT_GAME_JUNQI:
+            return BT_JUNQI_PREFIX;
+        case BT_GAME_CHESS:
+        default:
+            return BT_CHESS_PREFIX;
     }
-    generate_hash_from_bda(bda, hash, sizeof(hash));
-    snprintf(name, name_size, "%s%s", BT_CHESS_PREFIX, hash);
 }
 
-static bool is_chess_device(const char* name, char* hash_out, size_t hash_size)
+static const char* get_current_server_name(void)
 {
-    if (name == NULL) return false;
-    size_t prefix_len = strlen(BT_CHESS_PREFIX);
+    switch (s_game_type) {
+        case BT_GAME_XIANGQI:
+            return BT_XIANGQI_SERVER_NAME;
+        case BT_GAME_CHESS:
+        default:
+            return BT_CHESS_SERVER_NAME;
+    }
+}
+
+static bool is_game_device(const char* name, const char* prefix, char* hash_out, size_t hash_size)
+{
+    if (name == NULL || prefix == NULL) return false;
+    size_t prefix_len = strlen(prefix);
     if (strlen(name) < prefix_len + 6) return false;
-    if (strncmp(name, BT_CHESS_PREFIX, prefix_len) != 0) return false;
+    if (strncmp(name, prefix, prefix_len) != 0) return false;
     if (hash_out != NULL && hash_size >= 7) {
         strncpy(hash_out, name + prefix_len, 6);
         hash_out[6] = '\0';
     }
     return true;
+}
+
+static void generate_device_name(char* name, size_t name_size)
+{
+    const uint8_t* bda = esp_bt_dev_get_address();
+    char hash[7];
+    const char* prefix = get_current_prefix();
+    if (bda == NULL) {
+        snprintf(name, name_size, "%s000000", prefix);
+        return;
+    }
+    generate_hash_from_bda(bda, hash, sizeof(hash));
+    snprintf(name, name_size, "%s%s", prefix, hash);
+}
+
+static bool is_chess_device(const char* name, char* hash_out, size_t hash_size)
+{
+    return is_game_device(name, get_current_prefix(), hash_out, hash_size);
 }
 
 static bool get_name_from_eir(uint8_t* eir, char* bdname, uint8_t* bdname_len)
@@ -494,6 +530,7 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t* param)
             s_spp_server_handle = param->start.handle;
             char device_name[BT_CHESS_NAME_LEN];
             generate_device_name(device_name, sizeof(device_name));
+            ESP_LOGI(BT_CHESS_TAG, "Setting device name for advertising: %s", device_name);
             esp_bt_gap_set_device_name(device_name);
             esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
             // If we were trying to reconnect, stay in reconnecting state (waiting for client)
@@ -528,12 +565,16 @@ static void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* pa
             ESP_LOGI(BT_CHESS_TAG, "Discovery result");
             char bdname[ESP_BT_GAP_MAX_BDNAME_LEN + 1];
             uint8_t bdname_len = 0;
+            const char* current_prefix = get_current_prefix();
+            ESP_LOGI(BT_CHESS_TAG, "Looking for devices with prefix: %s", current_prefix);
+
             for (int i = 0; i < param->disc_res.num_prop; i++) {
                 if (param->disc_res.prop[i].type == ESP_BT_GAP_DEV_PROP_EIR &&
                     get_name_from_eir(param->disc_res.prop[i].val, bdname, &bdname_len)) {
+                    ESP_LOGI(BT_CHESS_TAG, "Found device: %s", bdname);
                     char hash[7];
                     if (is_chess_device(bdname, hash, sizeof(hash))) {
-                        ESP_LOGI(BT_CHESS_TAG, "Found chess device: %s (hash: %s)", bdname, hash);
+                        ESP_LOGI(BT_CHESS_TAG, "Found matching game device: %s (hash: %s)", bdname, hash);
                         _lock_acquire(&s_bluetooth_lock);
                         bool already_found = false;
                         for (int j = 0; j < s_found_device_count; j++) {
@@ -553,6 +594,7 @@ static void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* pa
                             s_found_device_count++;
                             _lock_release(&s_bluetooth_lock);
 
+                            ESP_LOGI(BT_CHESS_TAG, "Added device to list, total: %d", current_count + 1);
                             if (s_device_found_callback) {
                                 s_device_found_callback(dev, current_count);
                             }
@@ -704,6 +746,25 @@ void bt_chess_init(void)
     s_initialized = true;
 }
 
+void bt_chess_set_game_type(BluetoothGameType game_type)
+{
+    ESP_LOGI(BT_CHESS_TAG, "Setting game type: %d", game_type);
+    s_game_type = game_type;
+
+    // 如果蓝牙已经初始化，更新设备名称
+    if (s_initialized) {
+        char device_name[BT_CHESS_NAME_LEN];
+        generate_device_name(device_name, sizeof(device_name));
+        esp_bt_gap_set_device_name(device_name);
+        ESP_LOGI(BT_CHESS_TAG, "Updated device name to: %s", device_name);
+    }
+}
+
+BluetoothGameType bt_chess_get_game_type(void)
+{
+    return s_game_type;
+}
+
 void bt_chess_deinit(void)
 {
     if (!s_initialized) {
@@ -763,7 +824,7 @@ void bt_chess_debug_dump(void)
 
 bool bt_chess_start_hosting(void)
 {
-    ESP_LOGI(BT_CHESS_TAG, "Starting hosting");
+    ESP_LOGI(BT_CHESS_TAG, "Starting hosting for game type: %d", s_game_type);
     if (!s_initialized) {
         ESP_LOGE(BT_CHESS_TAG, "Bluetooth not initialized");
         return false;
@@ -778,7 +839,8 @@ bool bt_chess_start_hosting(void)
     }
     s_role = BT_CHESS_ROLE_HOST;
     s_found_device_count = 0;
-    esp_err_t ret = esp_spp_start_srv(ESP_SPP_SEC_AUTHENTICATE, ESP_SPP_ROLE_SLAVE, 0, BT_CHESS_SERVER_NAME);
+    const char* server_name = get_current_server_name();
+    esp_err_t ret = esp_spp_start_srv(ESP_SPP_SEC_AUTHENTICATE, ESP_SPP_ROLE_SLAVE, 0, server_name);
     if (ret != ESP_OK) {
         ESP_LOGE(BT_CHESS_TAG, "Failed to start SPP server: %s", esp_err_to_name(ret));
         s_role = BT_CHESS_ROLE_NONE;

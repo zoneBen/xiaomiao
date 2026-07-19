@@ -2,9 +2,12 @@
 #include "sound.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "chess_bluetooth.h"
+#include "bluetooth_game.h"
 #include <string.h>
 #include <stdio.h>
+
+// Request UI refresh (defined in xiaomiao-01.c)
+extern void request_ui_render(void);
 
 static const char* TAG = "GomokuUI";
 
@@ -57,6 +60,83 @@ static const char* exit_confirm_items[] = {
     "Cancel"
 };
 
+// Bluetooth callbacks
+static void on_bluetooth_state_change(BluetoothGameState state) {
+    ESP_LOGI(TAG, "Bluetooth state changed: %d", state);
+    request_ui_render();
+}
+
+static void on_device_found(const FoundBluetoothDevice* device, int index) {
+    ESP_LOGI(TAG, "Device found: %s", device->name);
+    request_ui_render();
+}
+
+static void on_device_list_complete(int count) {
+    ESP_LOGI(TAG, "Device list complete: %d", count);
+    request_ui_render();
+}
+
+static void on_connected(void) {
+    ESP_LOGI(TAG, "Bluetooth connected");
+    request_ui_render();
+}
+
+static void on_disconnected(void) {
+    ESP_LOGI(TAG, "Bluetooth disconnected");
+    request_ui_render();
+}
+
+static void on_invite_received(void) {
+    ESP_LOGI(TAG, "Invite received");
+    if (g_ui && g_ui->current_screen == GM_SCREEN_BLUETOOTH_WAITING) {
+        bt_game_accept_connection();
+    }
+    request_ui_render();
+}
+
+static void on_invite_accepted(int local_side) {
+    ESP_LOGI(TAG, "Invite accepted, local side: %d", local_side);
+    gomoku_ui_switch_screen(GM_SCREEN_GAME);
+    sound_play(SOUND_GAME_START);
+    request_ui_render();
+}
+
+static void on_move_received(int from_x, int from_y, int to_x, int to_y, int promotion) {
+    ESP_LOGI(TAG, "Move received: %d,%d -> %d,%d", from_x, from_y, to_x, to_y);
+    if (!g_ui) return;
+
+    ui_lock_acquire();
+    // For gomoku, from and to are the same position
+    gomoku_place_piece(&g_ui->game, to_x, to_y);
+    sound_play(SOUND_MOVE);
+    gomoku_ui_render_locked();
+    ui_lock_release();
+}
+
+static void on_game_over(int winner) {
+    ESP_LOGI(TAG, "Game over, winner: %d", winner);
+    if (!g_ui) return;
+
+    ui_lock_acquire();
+    g_ui->game.game_over = true;
+    g_ui->game.winner = (winner == 0) ? GOMOKU_BLACK : GOMOKU_WHITE;
+    sound_play(SOUND_CHECKMATE);
+    gomoku_ui_render_locked();
+    ui_lock_release();
+}
+
+static void on_sync_received(const GenericGameState* game) {
+    ESP_LOGI(TAG, "Game sync received");
+    if (!g_ui || !game) return;
+
+    ui_lock_acquire();
+    g_ui->game.current_player = (game->current_turn == 0) ? GOMOKU_BLACK : GOMOKU_WHITE;
+    g_ui->game.game_over = game->game_over;
+    g_ui->game.winner = (game->winner == 0) ? GOMOKU_BLACK : (game->winner == 1) ? GOMOKU_WHITE : GOMOKU_EMPTY;
+    gomoku_ui_render_locked();
+    ui_lock_release();
+}
+
 void gomoku_ui_init(void)
 {
     if (g_ui != NULL) {
@@ -64,6 +144,8 @@ void gomoku_ui_init(void)
     }
 
     ESP_LOGI(TAG, "Initializing Gomoku UI");
+
+    bt_game_set_type(BT_GAME_GOMOKU);
 
     g_ui = (GomokuUIState*)calloc(1, sizeof(GomokuUIState));
     if (!g_ui) {
@@ -122,9 +204,22 @@ void gomoku_ui_switch_screen(GomokuScreen screen)
         case GM_SCREEN_BLUETOOTH_MENU:
             g_ui->menu_count = 3;
             if (!g_ui->bluetooth_initialized) {
-                bt_chess_init();
+                bt_game_set_type(BT_GAME_GOMOKU);
+                bt_game_init();
+                bt_game_set_state_callback(on_bluetooth_state_change);
+                bt_game_set_device_found_callback(on_device_found);
+                bt_game_set_device_list_complete_callback(on_device_list_complete);
+                bt_game_set_connected_callback(on_connected);
+                bt_game_set_disconnected_callback(on_disconnected);
+                bt_game_set_invite_callback(on_invite_received);
+                bt_game_set_invite_accepted_callback(on_invite_accepted);
+                bt_game_set_move_callback(on_move_received);
+                bt_game_set_game_over_callback(on_game_over);
+                bt_game_set_sync_callback(on_sync_received);
                 g_ui->bluetooth_initialized = true;
                 strcpy(g_ui->bluetooth_status, "Bluetooth: Ready");
+            } else {
+                bt_game_set_type(BT_GAME_GOMOKU);
             }
             break;
         case GM_SCREEN_BLUETOOTH_SCAN:
@@ -264,7 +359,7 @@ static void render_bluetooth_scan(void)
     }
 
     FoundBluetoothDevice local_devices[MAX_FOUND_DEVICES];
-    int device_count = bt_chess_copy_found_devices(local_devices, MAX_FOUND_DEVICES);
+    int device_count = bt_game_copy_found_devices(local_devices, MAX_FOUND_DEVICES);
 
     if (device_count == 0) {
         text_x = 10;
@@ -393,6 +488,18 @@ static void gomoku_draw_info(void)
     for (const char* p = turn_text; *p; p++) {
         tft_sprite_draw_char(&g_sprite, x, y, *p, TFT_LIGHTGREY, 1);
         x += 6;
+    }
+
+    BluetoothGameState bt_state = bt_game_get_state();
+    if (bt_state >= BT_GAME_STATE_GAME_READY) {
+        const char* bt_turn_text = bt_game_is_my_turn() ? "Your Turn" : "Opp Turn";
+        uint16_t bt_color = bt_game_is_my_turn() ? RGB_TO_RGB565(0x00, 0xFF, 0x00) : RGB_TO_RGB565(0xFF, 0x00, 0x00);
+        int bx = 5;
+        int by = 135;
+        for (const char* p = bt_turn_text; *p; p++) {
+            tft_sprite_draw_char(&g_sprite, bx, by, *p, bt_color, 1);
+            bx += 6;
+        }
     }
 
     const char* hint = "B: Back";
@@ -583,12 +690,12 @@ void gomoku_ui_handle_key(int key)
             } else if (key == KEY_A) {
                 sound_play(SOUND_MENU_SELECT);
                 if (g_ui->menu_index == 0) {
-                    if (bt_chess_start_hosting()) {
+                    if (bt_game_start_hosting()) {
                         strcpy(g_ui->bluetooth_status, "Waiting for opponent...");
                         gomoku_ui_switch_screen(GM_SCREEN_BLUETOOTH_WAITING);
                     }
                 } else if (g_ui->menu_index == 1) {
-                    if (bt_chess_start_scanning()) {
+                    if (bt_game_start_scanning()) {
                         strcpy(g_ui->bluetooth_status, "Scanning...");
                         gomoku_ui_switch_screen(GM_SCREEN_BLUETOOTH_SCAN);
                     }
@@ -608,7 +715,7 @@ void gomoku_ui_handle_key(int key)
                     g_ui->selected_device_index--;
                 }
             } else if (key == KEY_DOWN) {
-                int device_count = bt_chess_get_found_device_count();
+                int device_count = bt_game_get_found_device_count();
                 if (g_ui->selected_device_index < device_count - 1) {
                     sound_play(SOUND_KEY_CLICK);
                     g_ui->selected_device_index++;
@@ -616,14 +723,14 @@ void gomoku_ui_handle_key(int key)
             } else if (key == KEY_A) {
                 if (g_ui->selected_device_index >= 0) {
                     sound_play(SOUND_MENU_SELECT);
-                    if (bt_chess_connect_to_device(g_ui->selected_device_index)) {
+                    if (bt_game_connect_to_device(g_ui->selected_device_index)) {
                         strcpy(g_ui->bluetooth_status, "Connecting...");
                         gomoku_ui_switch_screen(GM_SCREEN_BLUETOOTH_WAITING);
                     }
                 }
             } else if (key == KEY_B) {
                 sound_play(SOUND_KEY_CLICK);
-                bt_chess_stop_scanning();
+                bt_game_stop_scanning();
                 gomoku_ui_switch_screen(GM_SCREEN_BLUETOOTH_MENU);
             }
             break;
@@ -631,9 +738,9 @@ void gomoku_ui_handle_key(int key)
         case GM_SCREEN_BLUETOOTH_WAITING:
             if (key == KEY_B) {
                 sound_play(SOUND_KEY_CLICK);
-                bt_chess_disconnect();
-                bt_chess_stop_hosting();
-                bt_chess_stop_scanning();
+                bt_game_disconnect();
+                bt_game_stop_hosting();
+                bt_game_stop_scanning();
                 gomoku_ui_switch_screen(GM_SCREEN_BLUETOOTH_MENU);
             }
             break;
@@ -652,6 +759,10 @@ void gomoku_ui_handle_key(int key)
             } else if (key == KEY_A) {
                 sound_play(SOUND_MENU_SELECT);
                 if (g_ui->menu_index == 0) {
+                    BluetoothGameState bt_state = bt_game_get_state();
+                    if (bt_state == BT_GAME_STATE_GAME_READY || bt_state == BT_GAME_STATE_PLAYING) {
+                        bt_game_send_resign();
+                    }
                     gomoku_ui_switch_screen(GM_SCREEN_MAIN_MENU);
                 } else {
                     gomoku_ui_switch_screen(g_ui->previous_screen);
@@ -669,6 +780,13 @@ void gomoku_ui_handle_key(int key)
                     gomoku_ui_switch_screen(GM_SCREEN_MAIN_MENU);
                 }
                 break;
+            }
+
+            BluetoothGameState bt_state = bt_game_get_state();
+            bool is_bluetooth_game = (bt_state == BT_GAME_STATE_GAME_READY || bt_state == BT_GAME_STATE_PLAYING);
+            bool is_our_turn = true;
+            if (is_bluetooth_game) {
+                is_our_turn = bt_game_is_my_turn();
             }
 
             if (key == KEY_UP) {
@@ -692,8 +810,18 @@ void gomoku_ui_handle_key(int key)
                     sound_play(SOUND_KEY_CLICK);
                 }
             } else if (key == KEY_A) {
-                if (gomoku_place_piece(&g_ui->game, g_ui->cursor_x, g_ui->cursor_y)) {
+                if (is_bluetooth_game && !is_our_turn) {
+                    sound_play(SOUND_INVALID_MOVE);
+                } else if (gomoku_place_piece(&g_ui->game, g_ui->cursor_x, g_ui->cursor_y)) {
                     sound_play(SOUND_MOVE);
+                    if (is_bluetooth_game) {
+                        bt_game_save_game_state((GenericGameState*)&g_ui->game);
+                        bt_game_send_move(g_ui->cursor_x, g_ui->cursor_y, g_ui->cursor_x, g_ui->cursor_y, 0);
+                        if (g_ui->game.game_over) {
+                            int winner = (g_ui->game.winner == GOMOKU_BLACK) ? 0 : 1;
+                            bt_game_send_game_over(winner);
+                        }
+                    }
                 } else {
                     sound_play(SOUND_INVALID_MOVE);
                 }

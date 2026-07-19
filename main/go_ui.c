@@ -2,7 +2,7 @@
 #include "sound.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "chess_bluetooth.h"
+#include "bluetooth_game.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -122,9 +122,12 @@ void go_ui_switch_screen(GoScreen screen)
         case GO_SCREEN_BLUETOOTH_MENU:
             g_ui->menu_count = 3;
             if (!g_ui->bluetooth_initialized) {
-                bt_chess_init();
+                bt_game_set_type(BT_GAME_GO);
+                bt_game_init();
                 g_ui->bluetooth_initialized = true;
                 strcpy(g_ui->bluetooth_status, "Bluetooth: Ready");
+            } else {
+                bt_game_set_type(BT_GAME_GO);
             }
             break;
         case GO_SCREEN_BLUETOOTH_SCAN:
@@ -264,7 +267,7 @@ static void render_bluetooth_scan(void)
     }
 
     FoundBluetoothDevice local_devices[MAX_FOUND_DEVICES];
-    int device_count = bt_chess_copy_found_devices(local_devices, MAX_FOUND_DEVICES);
+    int device_count = bt_game_copy_found_devices(local_devices, MAX_FOUND_DEVICES);
 
     if (device_count == 0) {
         text_x = 10;
@@ -580,12 +583,12 @@ void go_ui_handle_key(int key)
             } else if (key == KEY_A) {
                 sound_play(SOUND_MENU_SELECT);
                 if (g_ui->menu_index == 0) {
-                    if (bt_chess_start_hosting()) {
+                    if (bt_game_start_hosting()) {
                         strcpy(g_ui->bluetooth_status, "Waiting for opponent...");
                         go_ui_switch_screen(GO_SCREEN_BLUETOOTH_WAITING);
                     }
                 } else if (g_ui->menu_index == 1) {
-                    if (bt_chess_start_scanning()) {
+                    if (bt_game_start_scanning()) {
                         strcpy(g_ui->bluetooth_status, "Scanning...");
                         go_ui_switch_screen(GO_SCREEN_BLUETOOTH_SCAN);
                     }
@@ -605,7 +608,7 @@ void go_ui_handle_key(int key)
                     g_ui->selected_device_index--;
                 }
             } else if (key == KEY_DOWN) {
-                int device_count = bt_chess_get_found_device_count();
+                int device_count = bt_game_get_found_device_count();
                 if (g_ui->selected_device_index < device_count - 1) {
                     sound_play(SOUND_KEY_CLICK);
                     g_ui->selected_device_index++;
@@ -613,14 +616,14 @@ void go_ui_handle_key(int key)
             } else if (key == KEY_A) {
                 if (g_ui->selected_device_index >= 0) {
                     sound_play(SOUND_MENU_SELECT);
-                    if (bt_chess_connect_to_device(g_ui->selected_device_index)) {
+                    if (bt_game_connect_to_device(g_ui->selected_device_index)) {
                         strcpy(g_ui->bluetooth_status, "Connecting...");
                         go_ui_switch_screen(GO_SCREEN_BLUETOOTH_WAITING);
                     }
                 }
             } else if (key == KEY_B) {
                 sound_play(SOUND_KEY_CLICK);
-                bt_chess_stop_scanning();
+                bt_game_stop_scanning();
                 go_ui_switch_screen(GO_SCREEN_BLUETOOTH_MENU);
             }
             break;
@@ -628,9 +631,9 @@ void go_ui_handle_key(int key)
         case GO_SCREEN_BLUETOOTH_WAITING:
             if (key == KEY_B) {
                 sound_play(SOUND_KEY_CLICK);
-                bt_chess_disconnect();
-                bt_chess_stop_hosting();
-                bt_chess_stop_scanning();
+                bt_game_disconnect();
+                bt_game_stop_hosting();
+                bt_game_stop_scanning();
                 go_ui_switch_screen(GO_SCREEN_BLUETOOTH_MENU);
             }
             break;

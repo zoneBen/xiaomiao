@@ -3,7 +3,7 @@
 #include "sound.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "chess_bluetooth.h"
+#include "bluetooth_game.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -130,43 +130,53 @@ static void recalculate_material(void) {
     }
 }
 
+// 声明外部函数
+extern void request_ui_render(void);
+
 // Bluetooth callbacks
-static void on_bluetooth_state_change(BluetoothChessState state) {
+static void on_bluetooth_state_change(BluetoothGameState state) {
     ESP_LOGI(TAG, "Bluetooth state changed: %d", state);
+    request_ui_render();
 }
 
 static void on_device_found(const FoundBluetoothDevice* device, int index) {
     ESP_LOGI(TAG, "Device found: %s", device->name);
+    request_ui_render();
 }
 
 static void on_device_list_complete(int count) {
     ESP_LOGI(TAG, "Device list complete: %d", count);
+    request_ui_render();
 }
 
 static void on_connected(void) {
     ESP_LOGI(TAG, "Bluetooth connected");
+    request_ui_render();
 }
 
 static void on_disconnected(void) {
     ESP_LOGI(TAG, "Bluetooth disconnected");
+    request_ui_render();
 }
 
 static void on_invite_received(void) {
     ESP_LOGI(TAG, "Invite received");
     if (g_ui && g_ui->current_screen == XQ_SCREEN_BLUETOOTH_WAITING) {
         // 主机直接接受连接
-        bt_chess_accept_connection();
+        bt_game_accept_connection();
     }
+    request_ui_render();
 }
 
-static void on_invite_accepted(ChessColor local_color) {
-    ESP_LOGI(TAG, "Invite accepted, local color: %d", local_color);
+static void on_invite_accepted(int local_side) {
+    ESP_LOGI(TAG, "Invite accepted, local side: %d", local_side);
     // 切换到游戏界面
     xiangqi_ui_switch_screen(XQ_SCREEN_GAME);
     sound_play(SOUND_GAME_START);
+    request_ui_render();
 }
 
-static void on_move_received(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion) {
+static void on_move_received(int from_x, int from_y, int to_x, int to_y, int promotion) {
     ESP_LOGI(TAG, "Move received: %d,%d -> %d,%d", from_x, from_y, to_x, to_y);
     if (!g_ui) return;
 
@@ -186,7 +196,7 @@ static void on_move_received(int from_x, int from_y, int to_x, int to_y, ChessPi
     // 执行走棋
     if (xiangqi_make_move(&g_ui->game, from_x, from_y, to_x, to_y)) {
         // 保存游戏状态用于同步
-        bt_chess_save_game_state((ChessGame*)&g_ui->game);
+        bt_game_save_game_state((GenericGameState*)&g_ui->game);
 
         // 更新最后一步高亮
         g_ui->last_move_from_x = from_x;
@@ -228,23 +238,23 @@ static void on_move_received(int from_x, int from_y, int to_x, int to_y, ChessPi
     g_ui->turn_start_time = esp_timer_get_time();
     g_ui->current_turn_tracked = xiangqi_get_current_turn(&g_ui->game);
 
-    chess_ui_render_locked();
+    xiangqi_ui_render_locked();
     ui_lock_release();
 }
 
-static void on_game_over(ChessColor winner) {
+static void on_game_over(int winner) {
     ESP_LOGI(TAG, "Game over, winner: %d", winner);
     if (!g_ui) return;
 
     ui_lock_acquire();
     g_ui->game.game_over = true;
-    g_ui->game.winner = (winner == COLOR_WHITE) ? XIANGQI_COLOR_RED : XIANGQI_COLOR_BLACK;
+    g_ui->game.winner = (winner == 0) ? XIANGQI_COLOR_RED : XIANGQI_COLOR_BLACK;
     sound_play(SOUND_CHECKMATE);
-    chess_ui_render_locked();
+    xiangqi_ui_render_locked();
     ui_lock_release();
 }
 
-static void on_sync_received(const ChessGame* game) {
+static void on_sync_received(const GenericGameState* game) {
     ESP_LOGI(TAG, "Game sync received");
     if (!g_ui || !game) return;
 
@@ -252,11 +262,11 @@ static void on_sync_received(const ChessGame* game) {
     // 注意：这里类型不完全匹配，但我们可以复制基本数据
     // 实际上我们需要一个专门为中国象棋设计的同步
     // 暂时只复制基本状态
-    g_ui->game.current_turn = (game->current_turn == COLOR_WHITE) ? XIANGQI_COLOR_RED : XIANGQI_COLOR_BLACK;
+    g_ui->game.current_turn = (game->current_turn == 0) ? XIANGQI_COLOR_RED : XIANGQI_COLOR_BLACK;
     g_ui->game.move_count = game->fullmove_number;
     g_ui->game.game_over = game->game_over;
-    g_ui->game.winner = (game->winner == COLOR_WHITE) ? XIANGQI_COLOR_RED :
-                       (game->winner == COLOR_BLACK) ? XIANGQI_COLOR_BLACK : XIANGQI_COLOR_NONE;
+    g_ui->game.winner = (game->winner == 0) ? XIANGQI_COLOR_RED :
+                       (game->winner == 1) ? XIANGQI_COLOR_BLACK : XIANGQI_COLOR_NONE;
 
     // 重新计算子力价值
     recalculate_material();
@@ -265,7 +275,7 @@ static void on_sync_received(const ChessGame* game) {
     g_ui->current_turn_tracked = g_ui->game.current_turn;
     g_ui->turn_start_time = esp_timer_get_time();
 
-    chess_ui_render_locked();
+    xiangqi_ui_render_locked();
     ui_lock_release();
 }
 
@@ -276,6 +286,9 @@ void xiangqi_ui_init(void)
     }
 
     ESP_LOGI(TAG, "Initializing Xiangqi UI");
+
+    // 立即设置为中国象棋游戏类型
+    bt_game_set_type(BT_GAME_XIANGQI);
 
     g_ui = (XiangqiUIState*)calloc(1, sizeof(XiangqiUIState));
     if (!g_ui) {
@@ -345,8 +358,8 @@ void xiangqi_ui_switch_screen(XiangqiScreen screen)
          g_ui->current_screen == XQ_SCREEN_BLUETOOTH_WAITING ||
          g_ui->current_screen == XQ_SCREEN_BLUETOOTH_MENU)) {
         ESP_LOGI(TAG, "Cleaning up Bluetooth on return to main menu");
-        bt_chess_stop_scanning();
-        bt_chess_stop_hosting();
+        bt_game_stop_scanning();
+        bt_game_stop_hosting();
     }
 
     g_ui->previous_screen = g_ui->current_screen;
@@ -364,20 +377,25 @@ void xiangqi_ui_switch_screen(XiangqiScreen screen)
         case XQ_SCREEN_BLUETOOTH_MENU:
             g_ui->menu_count = 3;
             if (!g_ui->bluetooth_initialized) {
-                bt_chess_init();
+                // 设置为中国象棋游戏类型
+                bt_game_set_type(BT_GAME_XIANGQI);
+                bt_game_init();
                 // 设置回调
-                bt_chess_set_state_callback(on_bluetooth_state_change);
-                bt_chess_set_device_found_callback(on_device_found);
-                bt_chess_set_device_list_complete_callback(on_device_list_complete);
-                bt_chess_set_connected_callback(on_connected);
-                bt_chess_set_disconnected_callback(on_disconnected);
-                bt_chess_set_invite_callback(on_invite_received);
-                bt_chess_set_invite_accepted_callback(on_invite_accepted);
-                bt_chess_set_move_callback(on_move_received);
-                bt_chess_set_game_over_callback(on_game_over);
-                bt_chess_set_sync_callback(on_sync_received);
+                bt_game_set_state_callback(on_bluetooth_state_change);
+                bt_game_set_device_found_callback(on_device_found);
+                bt_game_set_device_list_complete_callback(on_device_list_complete);
+                bt_game_set_connected_callback(on_connected);
+                bt_game_set_disconnected_callback(on_disconnected);
+                bt_game_set_invite_callback(on_invite_received);
+                bt_game_set_invite_accepted_callback(on_invite_accepted);
+                bt_game_set_move_callback(on_move_received);
+                bt_game_set_game_over_callback(on_game_over);
+                bt_game_set_sync_callback(on_sync_received);
                 g_ui->bluetooth_initialized = true;
                 strcpy(g_ui->bluetooth_status, "Bluetooth: Ready");
+            } else {
+                // 确保每次进入蓝牙菜单都设置正确的游戏类型
+                bt_game_set_type(BT_GAME_XIANGQI);
             }
             break;
         case XQ_SCREEN_BLUETOOTH_SCAN:
@@ -390,10 +408,10 @@ void xiangqi_ui_switch_screen(XiangqiScreen screen)
         case XQ_SCREEN_GAME:
         {
             // 检查是否从蓝牙重连回来
-            BluetoothChessState bt_state = bt_chess_get_state();
-            bool was_reconnecting = (bt_state == BT_CHESS_STATE_GAME_READY ||
-                                    bt_state == BT_CHESS_STATE_PLAYING ||
-                                    bt_state == BT_CHESS_STATE_RECONNECTING);
+            BluetoothGameState bt_state = bt_game_get_state();
+            bool was_reconnecting = (bt_state == BT_GAME_STATE_GAME_READY ||
+                                    bt_state == BT_GAME_STATE_PLAYING ||
+                                    bt_state == BT_GAME_STATE_RECONNECTING);
             bool was_in_exit_confirm = (g_ui->previous_screen == XQ_SCREEN_EXIT_CONFIRM);
 
             if (!was_reconnecting && !was_in_exit_confirm) {
@@ -530,7 +548,7 @@ static void render_bluetooth_scan(void)
 
     // 获取设备列表
     FoundBluetoothDevice local_devices[MAX_FOUND_DEVICES];
-    int device_count = bt_chess_copy_found_devices(local_devices, MAX_FOUND_DEVICES);
+    int device_count = bt_game_copy_found_devices(local_devices, MAX_FOUND_DEVICES);
 
     if (device_count == 0) {
         tft_sprite_draw_string(&g_sprite, 10, 25, "Searching...", COLOR_YELLOW, 1);
@@ -692,9 +710,9 @@ static void xiangqi_draw_info(void)
     int y = 2;
 
     // ========== 顶部：蓝牙状态和回合指示 ==========
-    BluetoothChessState bt_state = bt_chess_get_state();
-    bool is_bluetooth_connected = (bt_state >= BT_CHESS_STATE_CONNECTED && bt_state != BT_CHESS_STATE_RECONNECTING);
-    uint16_t bt_status_color = (bt_state == BT_CHESS_STATE_RECONNECTING) ? COLOR_YELLOW :
+    BluetoothGameState bt_state = bt_game_get_state();
+    bool is_bluetooth_connected = (bt_state >= BT_GAME_STATE_CONNECTED && bt_state != BT_GAME_STATE_RECONNECTING);
+    uint16_t bt_status_color = (bt_state == BT_GAME_STATE_RECONNECTING) ? COLOR_YELLOW :
                               (is_bluetooth_connected ? COLOR_GREEN : COLOR_RED);
     // 蓝牙状态指示灯
     tft_sprite_fill_rect(&g_sprite, info_x, y, 8, 8, bt_status_color);
@@ -803,9 +821,9 @@ static void xiangqi_draw_info(void)
     y += 12;
 
     // ========== 蓝牙游戏回合提示 ==========
-    if (bt_state >= BT_CHESS_STATE_GAME_READY) {
-        const char* turn_label = bt_chess_is_my_turn() ? "YOUR TURN" : "OPP TURN";
-        uint16_t turn_color = bt_chess_is_my_turn() ? COLOR_GREEN : COLOR_RED;
+    if (bt_state >= BT_GAME_STATE_GAME_READY) {
+        const char* turn_label = bt_game_is_my_turn() ? "YOUR TURN" : "OPP TURN";
+        uint16_t turn_color = bt_game_is_my_turn() ? COLOR_GREEN : COLOR_RED;
         tft_sprite_fill_rect(&g_sprite, info_x - 2, y, 34, 12, turn_color);
         tft_sprite_draw_rect(&g_sprite, info_x - 2, y, 34, 12, COLOR_LIGHT_GRAY);
         tft_sprite_draw_string(&g_sprite, info_x, y + 2, turn_label, COLOR_BLACK, 1);
@@ -871,8 +889,8 @@ static void render_game(void)
     }
 
     // 重连提示
-    BluetoothChessState bt_state = bt_chess_get_state();
-    if (bt_state == BT_CHESS_STATE_RECONNECTING) {
+    BluetoothGameState bt_state = bt_game_get_state();
+    if (bt_state == BT_GAME_STATE_RECONNECTING) {
         tft_sprite_fill_rect(&g_sprite, 10, 20, 140, 65, COLOR_DIALOG);
         tft_sprite_draw_rect(&g_sprite, 10, 20, 140, 65, COLOR_YELLOW);
 
@@ -881,7 +899,7 @@ static void render_game(void)
         tft_sprite_draw_string(&g_sprite, recon_title_x, 35, recon_title, COLOR_YELLOW, 1);
 
         const char* recon_hint;
-        if (bt_chess_get_role() == BT_CHESS_ROLE_HOST) {
+        if (bt_game_get_role() == BT_GAME_ROLE_HOST) {
             recon_hint = "Waiting for guest";
         } else {
             recon_hint = "Press A to retry";
@@ -1056,12 +1074,12 @@ void xiangqi_ui_handle_key(int key)
             } else if (key == KEY_A) {
                 sound_play(SOUND_MENU_SELECT);
                 if (g_ui->menu_index == 0) {
-                    if (bt_chess_start_hosting()) {
+                    if (bt_game_start_hosting()) {
                         strcpy(g_ui->bluetooth_status, "Waiting for opponent...");
                         xiangqi_ui_switch_screen(XQ_SCREEN_BLUETOOTH_WAITING);
                     }
                 } else if (g_ui->menu_index == 1) {
-                    if (bt_chess_start_scanning()) {
+                    if (bt_game_start_scanning()) {
                         strcpy(g_ui->bluetooth_status, "Scanning...");
                         xiangqi_ui_switch_screen(XQ_SCREEN_BLUETOOTH_SCAN);
                     }
@@ -1081,7 +1099,7 @@ void xiangqi_ui_handle_key(int key)
                     g_ui->selected_device_index--;
                 }
             } else if (key == KEY_DOWN) {
-                int device_count = bt_chess_get_found_device_count();
+                int device_count = bt_game_get_found_device_count();
                 if (g_ui->selected_device_index < device_count - 1) {
                     sound_play(SOUND_KEY_CLICK);
                     g_ui->selected_device_index++;
@@ -1089,14 +1107,14 @@ void xiangqi_ui_handle_key(int key)
             } else if (key == KEY_A) {
                 if (g_ui->selected_device_index >= 0) {
                     sound_play(SOUND_MENU_SELECT);
-                    if (bt_chess_connect_to_device(g_ui->selected_device_index)) {
+                    if (bt_game_connect_to_device(g_ui->selected_device_index)) {
                         strcpy(g_ui->bluetooth_status, "Connecting...");
                         xiangqi_ui_switch_screen(XQ_SCREEN_BLUETOOTH_WAITING);
                     }
                 }
             } else if (key == KEY_B) {
                 sound_play(SOUND_KEY_CLICK);
-                bt_chess_stop_scanning();
+                bt_game_stop_scanning();
                 xiangqi_ui_switch_screen(XQ_SCREEN_BLUETOOTH_MENU);
             }
             break;
@@ -1104,9 +1122,9 @@ void xiangqi_ui_handle_key(int key)
         case XQ_SCREEN_BLUETOOTH_WAITING:
             if (key == KEY_B) {
                 sound_play(SOUND_KEY_CLICK);
-                bt_chess_disconnect();
-                bt_chess_stop_hosting();
-                bt_chess_stop_scanning();
+                bt_game_disconnect();
+                bt_game_stop_hosting();
+                bt_game_stop_scanning();
                 xiangqi_ui_switch_screen(XQ_SCREEN_BLUETOOTH_MENU);
             }
             break;
@@ -1126,10 +1144,10 @@ void xiangqi_ui_handle_key(int key)
                 sound_play(SOUND_MENU_SELECT);
                 if (g_ui->menu_index == 0) {
                     // 确认退出
-                    bool is_bluetooth_game = (bt_chess_get_state() == BT_CHESS_STATE_GAME_READY ||
-                                             bt_chess_get_state() == BT_CHESS_STATE_PLAYING);
+                    bool is_bluetooth_game = (bt_game_get_state() == BT_GAME_STATE_GAME_READY ||
+                                             bt_game_get_state() == BT_GAME_STATE_PLAYING);
                     if (is_bluetooth_game) {
-                        bt_chess_send_resign();
+                        bt_game_send_resign();
                     }
                     xiangqi_ui_switch_screen(XQ_SCREEN_MAIN_MENU);
                 } else {
@@ -1154,20 +1172,20 @@ void xiangqi_ui_handle_key(int key)
             }
 
             // 获取蓝牙状态
-            BluetoothChessState bt_state = bt_chess_get_state();
-            bool is_bluetooth_game = (bt_state == BT_CHESS_STATE_GAME_READY ||
-                                     bt_state == BT_CHESS_STATE_PLAYING);
-            bool is_reconnecting = (bt_state == BT_CHESS_STATE_RECONNECTING);
+            BluetoothGameState bt_state = bt_game_get_state();
+            bool is_bluetooth_game = (bt_state == BT_GAME_STATE_GAME_READY ||
+                                     bt_state == BT_GAME_STATE_PLAYING);
+            bool is_reconnecting = (bt_state == BT_GAME_STATE_RECONNECTING);
             bool is_our_turn = true;
             if (is_bluetooth_game) {
-                is_our_turn = bt_chess_is_my_turn();
+                is_our_turn = bt_game_is_my_turn();
             }
 
             // 重连状态下的处理
             if (is_reconnecting) {
                 if (key == KEY_A) {
                     // 尝试重连
-                    if (bt_chess_try_reconnect()) {
+                    if (bt_game_try_reconnect()) {
                         sound_play(SOUND_KEY_CLICK);
                         xiangqi_show_message_internal("Reconnecting...");
                     } else {
@@ -1177,7 +1195,7 @@ void xiangqi_ui_handle_key(int key)
                 } else if (key == KEY_B) {
                     sound_play(SOUND_KEY_CLICK);
                     // 取消重连
-                    bt_chess_disconnect();
+                    bt_game_disconnect();
                     xiangqi_ui_switch_screen(XQ_SCREEN_MAIN_MENU);
                 }
                 break;
@@ -1268,8 +1286,8 @@ void xiangqi_ui_handle_key(int key)
                                 sound_play(SOUND_CHECKMATE);
                                 // 蓝牙游戏时发送结束消息
                                 if (is_bluetooth_game) {
-                                    ChessColor winner = (g_ui->game.winner == XIANGQI_COLOR_RED) ? COLOR_WHITE : COLOR_BLACK;
-                                    bt_chess_send_game_over(winner);
+                                    int winner = (g_ui->game.winner == XIANGQI_COLOR_RED) ? 0 : 1;
+                                    bt_game_send_game_over(winner);
                                 }
                             } else {
                                 // 检查将军
@@ -1281,9 +1299,9 @@ void xiangqi_ui_handle_key(int key)
 
                             // 蓝牙游戏时发送走棋
                             if (is_bluetooth_game) {
-                                bt_chess_save_game_state((ChessGame*)&g_ui->game);
-                                bt_chess_send_move(g_ui->selected_x, g_ui->selected_y,
-                                                  g_ui->cursor_x, g_ui->cursor_y, PIECE_NONE);
+                                bt_game_save_game_state((GenericGameState*)&g_ui->game);
+                                bt_game_send_move(g_ui->selected_x, g_ui->selected_y,
+                                                  g_ui->cursor_x, g_ui->cursor_y, 0);
                             }
                         } else {
                             sound_play(SOUND_INVALID_MOVE);
@@ -1327,9 +1345,9 @@ void xiangqi_ui_handle_key(int key)
             } else if (key == KEY_B) {
                 sound_play(SOUND_KEY_CLICK);
                 // 检查是否在重连状态
-                BluetoothChessState state = bt_chess_get_state();
-                if (state == BT_CHESS_STATE_RECONNECTING) {
-                    bt_chess_disconnect();
+                BluetoothGameState state = bt_game_get_state();
+                if (state == BT_GAME_STATE_RECONNECTING) {
+                    bt_game_disconnect();
                     xiangqi_ui_switch_screen(XQ_SCREEN_MAIN_MENU);
                 } else if (g_ui->has_selection) {
                     g_ui->has_selection = false;

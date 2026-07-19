@@ -8,7 +8,7 @@
 #include "esp_log.h"
 #include "chess.h"
 #include "chess_ui.h"
-#include "chess_bluetooth.h"
+#include "bluetooth_game.h"
 #include "ui_lock.h"
 #include "tft_display.h"
 #include "sound.h"
@@ -57,9 +57,13 @@ static volatile int s_move_to_x = 0;
 static volatile int s_move_to_y = 0;
 static volatile ChessPieceType s_move_promotion = PIECE_NONE;
 
-// Structure to hold pending game sync
+// Structure to hold pending game sync (for chess)
 static volatile bool s_sync_pending = false;
 static ChessGame s_synced_game;
+
+// Generic game sync pending state
+static volatile bool s_game_sync_pending = false;
+static GenericGameState s_synced_generic_game;
 
 static TFT_Sprite s_sprite;
 static bool s_sprite_created = false;
@@ -69,6 +73,9 @@ static volatile bool chess_ui_should_exit_flag = false;
 
 // 设置国际象棋退出标志
 void chess_ui_set_should_exit(void);
+
+// 请求UI刷新（供蓝牙回调使用）
+void request_ui_render(void);
 
 static void render_top_menu(void)
 {
@@ -310,6 +317,7 @@ static void key_scan_task(void* arg)
                                 if (s_top_menu_state == TOP_MENU_GAMES) {
                                     if (s_game_selector_index == 0) {
                                         // 国际象棋
+                                        bt_game_set_type(BT_GAME_CHESS);
                                         s_current_game = GAME_CHESS;
                                         ui_lock_acquire();
                                         chess_ui_init();
@@ -317,6 +325,7 @@ static void key_scan_task(void* arg)
                                         ui_lock_release();
                                     } else if (s_game_selector_index == 1) {
                                         // 中国象棋
+                                        bt_game_set_type(BT_GAME_XIANGQI);
                                         s_current_game = GAME_XIANGQI;
                                         ui_lock_acquire();
                                         xiangqi_ui_init();
@@ -324,6 +333,7 @@ static void key_scan_task(void* arg)
                                         ui_lock_release();
                                     } else if (s_game_selector_index == 2) {
                                         // 五子棋
+                                        bt_game_set_type(BT_GAME_GOMOKU);
                                         s_current_game = GAME_GOMOKU;
                                         ui_lock_acquire();
                                         gomoku_ui_init();
@@ -331,6 +341,7 @@ static void key_scan_task(void* arg)
                                         ui_lock_release();
                                     } else if (s_game_selector_index == 3) {
                                         // 围棋
+                                        bt_game_set_type(BT_GAME_GO);
                                         s_current_game = GAME_GO;
                                         ui_lock_acquire();
                                         go_ui_init();
@@ -338,6 +349,7 @@ static void key_scan_task(void* arg)
                                         ui_lock_release();
                                     } else if (s_game_selector_index == 4) {
                                         // 军棋
+                                        bt_game_set_type(BT_GAME_JUNQI);
                                         s_current_game = GAME_JUNQI;
                                         ui_lock_acquire();
                                         junqi_ui_init();
@@ -398,11 +410,13 @@ static void ui_update_task(void* arg)
     bool need_screen_switch = false;
     bool need_apply_move = false;
     bool need_apply_sync = false;
+    bool need_apply_generic_sync = false;
     bool need_render = false;
     ChessScreen requested_screen = SCREEN_MAIN_MENU;
     int move_from_x = 0, move_from_y = 0, move_to_x = 0, move_to_y = 0;
     ChessPieceType move_promotion = PIECE_NONE;
     ChessGame synced_game;
+    GenericGameState synced_generic_game;
 
     while (1) {
         // ESP_LOGI(TAG, "UI update task loop running");
@@ -431,6 +445,12 @@ static void ui_update_task(void* arg)
         if (need_apply_sync) {
             s_sync_pending = false;
             memcpy(&synced_game, &s_synced_game, sizeof(ChessGame));
+        }
+
+        need_apply_generic_sync = s_game_sync_pending;
+        if (need_apply_generic_sync) {
+            s_game_sync_pending = false;
+            memcpy(&synced_generic_game, &s_synced_generic_game, sizeof(GenericGameState));
         }
 
         need_render = s_render_requested;
@@ -471,6 +491,11 @@ static void ui_update_task(void* arg)
                 if (need_apply_sync) {
                     ESP_LOGI(TAG, "Applying game sync from UI task (locked version)");
                     chess_ui_update_game_locked(&synced_game);
+                }
+
+                if (need_apply_generic_sync) {
+                    ESP_LOGI(TAG, "Applying generic game sync from UI task (locked version)");
+                    chess_ui_update_from_generic_locked(&synced_generic_game);
                 }
 
                 if (need_screen_switch) {
@@ -546,13 +571,13 @@ static void ui_update_task(void* arg)
     }
 }
 
-// Bluetooth chess callbacks
-static void bt_chess_state_change(BluetoothChessState state)
+// Bluetooth game callbacks
+static void bt_game_state_change(BluetoothGameState state)
 {
     ESP_LOGI(TAG, "Bluetooth state: %d", state);
     // If entering game ready state, also request screen switch
     // 但如果是从 RECONNECTING 或 PLAYING 来的（即重连），不切换屏幕
-    if (state == BT_CHESS_STATE_GAME_READY) {
+    if (state == BT_GAME_STATE_GAME_READY && s_current_game == GAME_CHESS) {
         // 检查之前是否在重连或游戏中（通过检查是否有保存的游戏状态或者是否刚重连）
         // 这里简单处理：每次只有在非重连场景下才切换屏幕
         // 实际上，通过 chess_ui_switch_screen 中的检查已经足够，这里也可以再加一层
@@ -574,37 +599,45 @@ void chess_ui_set_should_exit(void)
     chess_ui_should_exit_flag = true;
 }
 
-static void bt_chess_device_found(const FoundBluetoothDevice* device, int index)
+// 请求UI刷新（供蓝牙回调使用）
+void request_ui_render(void)
+{
+    s_render_requested = true;
+}
+
+static void bt_game_device_found(const FoundBluetoothDevice* device, int index)
 {
     ESP_LOGI(TAG, "Found device %d: %s", index, device->name);
     s_render_requested = true;
 }
 
-static void bt_chess_device_list_complete(int count)
+static void bt_game_device_list_complete(int count)
 {
     ESP_LOGI(TAG, "Device list complete: %d devices", count);
     s_render_requested = true;
 }
 
-static void bt_chess_connected(void)
+static void bt_game_connected(void)
 {
     ESP_LOGI(TAG, "Bluetooth connected");
     // 如果正在重连，不切换屏幕，保持在游戏画面
-    BluetoothChessState state = bt_chess_get_state();
-    if (state == BT_CHESS_STATE_RECONNECTING ||
-        state == BT_CHESS_STATE_GAME_READY ||
-        state == BT_CHESS_STATE_PLAYING) {
+    BluetoothGameState state = bt_game_get_state();
+    if (state == BT_GAME_STATE_RECONNECTING ||
+        state == BT_GAME_STATE_GAME_READY ||
+        state == BT_GAME_STATE_PLAYING) {
         ESP_LOGI(TAG, "Reconnected - staying in game screen");
         s_render_requested = true;
         return;
     }
-    // Request screen switch from UI update task
-    s_requested_screen = SCREEN_BLUETOOTH_WAITING;
-    s_screen_switch_requested = true;
+    // Request screen switch from UI update task only for chess
+    if (s_current_game == GAME_CHESS) {
+        s_requested_screen = SCREEN_BLUETOOTH_WAITING;
+        s_screen_switch_requested = true;
+    }
     s_render_requested = true;  // Also request render after switching
 }
 
-static void bt_chess_disconnected(void)
+static void bt_game_disconnected(void)
 {
     ESP_LOGI(TAG, "Bluetooth disconnected - staying in game, waiting for reconnection");
     // Don't exit the game - just stay in game screen and show disconnected status
@@ -612,58 +645,59 @@ static void bt_chess_disconnected(void)
     s_render_requested = true;
 }
 
-static void bt_chess_invite_received(void)
+static void bt_game_invite_received(void)
 {
     ESP_LOGI(TAG, "Bluetooth invite received");
     // 如果正在重连或者已经在游戏中，忽略这个 invite
-    BluetoothChessState state = bt_chess_get_state();
-    if (state == BT_CHESS_STATE_RECONNECTING ||
-        state == BT_CHESS_STATE_GAME_READY ||
-        state == BT_CHESS_STATE_PLAYING) {
+    BluetoothGameState state = bt_game_get_state();
+    if (state == BT_GAME_STATE_RECONNECTING ||
+        state == BT_GAME_STATE_GAME_READY ||
+        state == BT_GAME_STATE_PLAYING) {
         ESP_LOGI(TAG, "Ignoring invite - already in game or reconnecting");
         return;
     }
     // Host automatically accepts or shows prompt
     // For simplicity, let's auto-accept and send color assignment
-    bt_chess_accept_connection();
+    bt_game_accept_connection();
 }
 
-static void bt_chess_invite_accepted(ChessColor local_color)
+static void bt_game_invite_accepted(int local_side)
 {
-    ESP_LOGI(TAG, "Bluetooth invite accepted, local color: %d", local_color);
-    // Request screen switch from UI update task
-    s_requested_screen = SCREEN_GAME;
-    s_screen_switch_requested = true;
+    ESP_LOGI(TAG, "Bluetooth invite accepted, local side: %d", local_side);
+    // Request screen switch from UI update task only for chess
+    if (s_current_game == GAME_CHESS) {
+        s_requested_screen = SCREEN_GAME;
+        s_screen_switch_requested = true;
+    }
     s_render_requested = true;  // Also request render after switching
 }
 
-static void bt_chess_move_received(int from_x, int from_y, int to_x, int to_y, ChessPieceType promotion)
+static void bt_game_move_received(int from_x, int from_y, int to_x, int to_y, int promotion)
 {
     ESP_LOGI(TAG, "Bluetooth move: %d,%d -> %d,%d", from_x, from_y, to_x, to_y);
-    // Queue the move for processing in UI update task
+    // Queue the move for processing in UI update task (chess only)
     s_move_from_x = from_x;
     s_move_from_y = from_y;
     s_move_to_x = to_x;
     s_move_to_y = to_y;
-    s_move_promotion = promotion;
+    s_move_promotion = (ChessPieceType)promotion;
     s_move_pending = true;
 }
 
-static void bt_chess_game_over(ChessColor winner)
+static void bt_game_game_over(int winner)
 {
     ESP_LOGI(TAG, "Bluetooth game over, winner: %d", winner);
     s_render_requested = true;
 }
 
-static void bt_chess_sync_received(const ChessGame* game)
+static void bt_game_sync_received(const GenericGameState* game)
 {
     ESP_LOGI(TAG, "Game sync received (BT callback context!)");
     // Queue the sync for processing in UI update task
     // 注意：我们在蓝牙回调中，不要在这里获取 ui_lock！
     // 复制数据时使用 volatile 方式或者简单的原子标记
-    // 这里我们假设 ChessGame 复制是原子的（实际上不是，但在这个项目中我们用标志位保护）
-    memcpy((void*)&s_synced_game, (void*)game, sizeof(ChessGame));
-    s_sync_pending = true;  // 设置标志，让 UI 任务去处理
+    memcpy((void*)&s_synced_generic_game, (void*)game, sizeof(GenericGameState));
+    s_game_sync_pending = true;  // 设置标志，让 UI 任务去处理
     s_render_requested = true;
 }
 
@@ -691,18 +725,18 @@ void app_main(void)
     xTaskCreate(key_scan_task, "KeyScan", 4096, NULL, 5, NULL);
     xTaskCreate(ui_update_task, "UIUpdate", 4096, NULL, 4, NULL);
 
-    ESP_LOGI(TAG, "Initialize bluetooth chess (will be initialized on first use)");
-    // Note: bt_chess_init() will be called from the UI when entering the Bluetooth menu
-    bt_chess_set_state_callback(bt_chess_state_change);
-    bt_chess_set_device_found_callback(bt_chess_device_found);
-    bt_chess_set_device_list_complete_callback(bt_chess_device_list_complete);
-    bt_chess_set_connected_callback(bt_chess_connected);
-    bt_chess_set_disconnected_callback(bt_chess_disconnected);
-    bt_chess_set_invite_callback(bt_chess_invite_received);
-    bt_chess_set_invite_accepted_callback(bt_chess_invite_accepted);
-    bt_chess_set_move_callback(bt_chess_move_received);
-    bt_chess_set_game_over_callback(bt_chess_game_over);
-    bt_chess_set_sync_callback(bt_chess_sync_received);
+    ESP_LOGI(TAG, "Initialize bluetooth game (will be initialized on first use)");
+    // Note: bt_game_init() will be called from the UI when entering the Bluetooth menu
+    bt_game_set_state_callback(bt_game_state_change);
+    bt_game_set_device_found_callback(bt_game_device_found);
+    bt_game_set_device_list_complete_callback(bt_game_device_list_complete);
+    bt_game_set_connected_callback(bt_game_connected);
+    bt_game_set_disconnected_callback(bt_game_disconnected);
+    bt_game_set_invite_callback(bt_game_invite_received);
+    bt_game_set_invite_accepted_callback(bt_game_invite_accepted);
+    bt_game_set_move_callback(bt_game_move_received);
+    bt_game_set_game_over_callback(bt_game_game_over);
+    bt_game_set_sync_callback(bt_game_sync_received);
 
     ESP_LOGI(TAG, "XiaoMiao Chess started!");
 }
