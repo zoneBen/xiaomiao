@@ -363,6 +363,32 @@ void tft_sprite_draw_line(TFT_Sprite* sprite, int16_t x0, int16_t y0, int16_t x1
     }
 }
 
+void tft_sprite_draw_hline(TFT_Sprite* sprite, int16_t x, int16_t y, int16_t w, uint16_t color)
+{
+    if (!sprite || !sprite->created) return;
+
+    for (int16_t i = 0; i < w; i++) {
+        sprite_set_pixel(sprite, x + i, y, color);
+    }
+}
+
+void tft_sprite_draw_string(TFT_Sprite* sprite, int16_t x, int16_t y, const char* str, uint16_t color, uint8_t size)
+{
+    if (!sprite || !sprite->created) return;
+
+    int16_t orig_x = x;
+    while (*str) {
+        if (*str == '\n') {
+            y += 8 * size;
+            x = orig_x;
+        } else {
+            tft_sprite_draw_char(sprite, x, y, *str, color, size);
+            x += 6 * size;
+        }
+        str++;
+    }
+}
+
 void tft_sprite_draw_circle(TFT_Sprite* sprite, int16_t x0, int16_t y0, int16_t r, uint16_t color)
 {
     if (!sprite || !sprite->created) return;

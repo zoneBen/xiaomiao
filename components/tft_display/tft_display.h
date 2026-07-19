@@ -56,6 +56,33 @@ extern "C" {
 #define COLOR_DIALOG       RGB_TO_RGB565(0x1A, 0x1A, 0x1A)  // Dark gray dialog
 #define COLOR_TEXT         TFT_WHITE
 
+// Additional color aliases for Xiangqi UI
+#define COLOR_BLACK        TFT_BLACK
+#define COLOR_NAVY         TFT_NAVY
+#define COLOR_DARKGREEN    TFT_DARKGREEN
+#define COLOR_DARKCYAN     TFT_DARKCYAN
+#define COLOR_MAROON       TFT_MAROON
+#define COLOR_PURPLE       TFT_PURPLE
+#define COLOR_OLIVE        TFT_OLIVE
+#define COLOR_LIGHTGREY    TFT_LIGHTGREY
+#define COLOR_LIGHT_GRAY   TFT_LIGHTGREY  // Alias
+#define COLOR_DARKGREY     TFT_DARKGREY
+#define COLOR_BLUE         TFT_BLUE
+#define COLOR_GREEN        TFT_GREEN
+#define COLOR_CYAN         TFT_CYAN
+#define COLOR_RED          TFT_RED
+#define COLOR_MAGENTA      TFT_MAGENTA
+#define COLOR_YELLOW       TFT_YELLOW
+#define COLOR_WHITE        TFT_WHITE
+#define COLOR_ORANGE       TFT_ORANGE
+#define COLOR_GREENYELLOW  TFT_GREENYELLOW
+#define COLOR_PINK         TFT_PINK
+#define COLOR_BROWN        TFT_BROWN
+#define COLOR_GOLD         TFT_GOLD
+#define COLOR_SILVER       TFT_SILVER
+#define COLOR_SKYBLUE      TFT_SKYBLUE
+#define COLOR_VIOLET       TFT_VIOLET
+
 // Convert RGB888 to RGB565
 #define RGB_TO_RGB565(r, g, b) (((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3))
 
@@ -90,10 +117,12 @@ void tft_sprite_draw_rect(TFT_Sprite* sprite, int16_t x, int16_t y, int16_t w, i
 
 // XBitmap drawing (for chess pieces)
 void tft_sprite_draw_line(TFT_Sprite* sprite, int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color);
+void tft_sprite_draw_hline(TFT_Sprite* sprite, int16_t x, int16_t y, int16_t w, uint16_t color);
 void tft_sprite_draw_circle(TFT_Sprite* sprite, int16_t x0, int16_t y0, int16_t r, uint16_t color);
 void tft_sprite_draw_xbitmap(TFT_Sprite* sprite, int16_t x, int16_t y, const uint8_t* bitmap,
                              int16_t w, int16_t h, uint16_t color, uint16_t bg_color);
 void tft_sprite_draw_char(TFT_Sprite* sprite, int16_t x, int16_t y, char c, uint16_t color, uint8_t size);
+void tft_sprite_draw_string(TFT_Sprite* sprite, int16_t x, int16_t y, const char* str, uint16_t color, uint8_t size);
 int16_t tft_sprite_text_width(const char* str, uint8_t size);
 
 // Text functions

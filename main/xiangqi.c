@@ -129,6 +129,10 @@ void xiangqi_game_reset(XiangqiGame* game)
     game->game_over = false;
     game->winner = XIANGQI_COLOR_NONE;
     game->move_count = 0;
+    game->last_move.from_x = -1;
+    game->last_move.from_y = -1;
+    game->last_move.to_x = -1;
+    game->last_move.to_y = -1;
 }
 
 // ==================== 棋子访问 ====================
@@ -373,6 +377,13 @@ bool xiangqi_make_move(XiangqiGame* game, int from_x, int from_y, int to_x, int 
 
     XiangqiPiece target = game->board[to_y][to_x];
     XiangqiPiece moving = game->board[from_y][from_x];
+
+    // 记录移动
+    game->last_move.from_x = from_x;
+    game->last_move.from_y = from_y;
+    game->last_move.to_x = to_x;
+    game->last_move.to_y = to_y;
+    game->last_move.captured_piece = target;
 
     // 执行移动
     game->board[to_y][to_x] = moving;

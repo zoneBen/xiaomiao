@@ -45,10 +45,20 @@ typedef struct {
     XiangqiColor color;
 } XiangqiPiece;
 
+// 移动记录
+typedef struct {
+    int8_t from_x;
+    int8_t from_y;
+    int8_t to_x;
+    int8_t to_y;
+    XiangqiPiece captured_piece;
+} XiangqiMove;
+
 // 游戏状态
 typedef struct {
     XiangqiPiece board[XIANGQI_BOARD_HEIGHT][XIANGQI_BOARD_WIDTH];
     XiangqiColor current_turn;
+    XiangqiMove last_move;
     XiangqiColor winner;
     bool game_over;
     int move_count;
