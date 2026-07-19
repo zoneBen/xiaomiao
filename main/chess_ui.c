@@ -89,8 +89,7 @@ static ChessGame* g_game = NULL;
 static const char* main_menu_items[] = {
     "Local Game",
     "Bluetooth Game",
-    "Sound: Off",
-    "About"
+    "Back"
 };
 
 // Menu items for Bluetooth menu
@@ -191,6 +190,9 @@ static int get_piece_value(ChessPieceType type) {
     }
 }
 
+// 声明在xiaomiao-01.c中定义的退出标志设置函数
+extern void chess_ui_set_should_exit(void);
+
 void chess_ui_deinit(void)
 {
     if (g_ui) {
@@ -231,7 +233,7 @@ void chess_ui_switch_screen(ChessScreen screen)
             g_ui->menu_count = 0;
             break;
         case SCREEN_MAIN_MENU:
-            g_ui->menu_count = 4;
+            g_ui->menu_count = 3;
             break;
         case SCREEN_BLUETOOTH_MENU:
             g_ui->menu_count = 3;
@@ -460,19 +462,14 @@ void chess_ui_handle_key(KeyCode key)
                     sound_play(SOUND_MENU_SELECT);
                     chess_ui_switch_screen(SCREEN_BLUETOOTH_MENU);
                 } else if (g_ui->menu_index == 2) {
-                    // Toggle sound effects
-                    g_ui->sound_enabled = !g_ui->sound_enabled;
-                    sound_set_effects_enabled(g_ui->sound_enabled);
-                    if (g_ui->sound_enabled) {
-                        sound_play(SOUND_MENU_SELECT);
-                    }
-                } else if (g_ui->menu_index == 3) {
-                    // About
-                    sound_play(SOUND_MENU_SELECT);
-                    chess_ui_switch_screen(SCREEN_ABOUT);
+                    // 返回游戏选择
+                    sound_play(SOUND_KEY_CLICK);
+                    chess_ui_set_should_exit();
                 }
             } else if (key == KEY_B) {
+                // 在国际象棋主菜单按B键，返回到游戏选择界面
                 sound_play(SOUND_KEY_CLICK);
+                chess_ui_set_should_exit();
             }
             break;
         case SCREEN_ABOUT:
@@ -930,7 +927,7 @@ static void render_main_menu(void)
     }
 
     // Menu items
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 3; i++) {
         int y = 35 + i * 22;
         bool is_selected = (i == g_ui->menu_index);
 
@@ -940,10 +937,6 @@ static void render_main_menu(void)
 
         int text_x = 25;
         const char* text = main_menu_items[i];
-        if (i == 2) {
-            // Dynamic sound option text
-            text = g_ui->sound_enabled ? "Sound: On " : "Sound: Off";
-        }
         while (*text) {
             tft_sprite_draw_char(&g_ui->sprite, text_x, y + 6, *text, is_selected ? TFT_YELLOW : TFT_WHITE, 1);
             text_x += 6;
