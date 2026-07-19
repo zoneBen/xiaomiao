@@ -570,8 +570,8 @@ static void render_bluetooth_waiting(void)
 
 static void xiangqi_draw_board_lines(void)
 {
-    // 棋盘背景
-    uint16_t board_bg = RGB_TO_RGB565(0xCD, 0x85, 0x3F);
+    // 棋盘背景 - 调暗一点
+    uint16_t board_bg = RGB_TO_RGB565(0x8B, 0x5A, 0x2B);
     tft_sprite_fill_rect(&g_sprite, XIANGQI_OFFSET_X, XIANGQI_OFFSET_Y,
                         XIANGQI_BOARD_WIDTH * XIANGQI_SQUARE_SIZE,
                         XIANGQI_BOARD_HEIGHT * XIANGQI_SQUARE_SIZE,
@@ -645,28 +645,6 @@ static void xiangqi_draw_piece(int x, int y, XiangqiPiece piece)
     // 计算圆心位置
     int cx = XIANGQI_OFFSET_X + x * XIANGQI_SQUARE_SIZE + XIANGQI_SQUARE_SIZE / 2;
     int cy = XIANGQI_OFFSET_Y + y * XIANGQI_SQUARE_SIZE + XIANGQI_SQUARE_SIZE / 2;
-    int radius = (XIANGQI_SQUARE_SIZE - 3) / 2;
-
-    // 绘制圆形背景 - 浅米色
-    uint16_t bg = RGB_TO_RGB565(0xF0, 0xD0, 0xA0);
-    for (int dy = -radius; dy <= radius; dy++) {
-        for (int dx = -radius; dx <= radius; dx++) {
-            if (dx * dx + dy * dy <= radius * radius) {
-                tft_sprite_draw_pixel(&g_sprite, cx + dx, cy + dy, bg);
-            }
-        }
-    }
-
-    // 绘制圆形边框 - 深棕色
-    uint16_t border_color = RGB_TO_RGB565(0x60, 0x30, 0x10);
-    for (int dy = -radius; dy <= radius; dy++) {
-        for (int dx = -radius; dx <= radius; dx++) {
-            int dist_sq = dx * dx + dy * dy;
-            if (dist_sq >= (radius - 1) * (radius - 1) && dist_sq <= radius * radius) {
-                tft_sprite_draw_pixel(&g_sprite, cx + dx, cy + dy, border_color);
-            }
-        }
-    }
 
     XiangqiColor color = xiangqi_get_piece_color(piece);
     uint16_t text_color = (color == XIANGQI_COLOR_RED) ? COLOR_RED : COLOR_BLACK;
@@ -701,10 +679,11 @@ static void xiangqi_draw_cursor(int x, int y)
     int px = XIANGQI_OFFSET_X + x * XIANGQI_SQUARE_SIZE;
     int py = XIANGQI_OFFSET_Y + y * XIANGQI_SQUARE_SIZE;
     int s = XIANGQI_SQUARE_SIZE;
-    tft_sprite_fill_rect(&g_sprite, px, py, 4, 4, COLOR_CYAN);
-    tft_sprite_fill_rect(&g_sprite, px + s - 4, py, 4, 4, COLOR_CYAN);
-    tft_sprite_fill_rect(&g_sprite, px, py + s - 4, 4, 4, COLOR_CYAN);
-    tft_sprite_fill_rect(&g_sprite, px + s - 4, py + s - 4, 4, 4, COLOR_CYAN);
+    uint16_t cursor_color = RGB_TO_RGB565(0xFF, 0xFF, 0x00); // 亮黄色更醒目
+    tft_sprite_fill_rect(&g_sprite, px, py, 5, 5, cursor_color);
+    tft_sprite_fill_rect(&g_sprite, px + s - 5, py, 5, 5, cursor_color);
+    tft_sprite_fill_rect(&g_sprite, px, py + s - 5, 5, 5, cursor_color);
+    tft_sprite_fill_rect(&g_sprite, px + s - 5, py + s - 5, 5, 5, cursor_color);
 }
 
 static void xiangqi_draw_info(void)
