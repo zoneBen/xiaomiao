@@ -253,7 +253,6 @@ static const uint8_t* xiangqi_red_pieces[] = {
 
 // 黑方棋子
 static const uint8_t* xiangqi_black_pieces[] = {
-    NULL,
     xiangqi_piece_king_black,
     xiangqi_piece_advisor_black,
     xiangqi_piece_elephant_black,
