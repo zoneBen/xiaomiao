@@ -18,8 +18,8 @@ typedef enum {
 } ChessPieceType;
 
 typedef enum {
-    COLOR_WHITE = 0,
-    COLOR_BLACK
+    CHESS_COLOR_WHITE = 0,
+    CHESS_COLOR_BLACK
 } ChessColor;
 
 typedef struct {

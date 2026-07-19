@@ -4,28 +4,28 @@
 static void init_board(ChessGame* game) {
     memset(game->board, 0, sizeof(game->board));
 
-    game->board[0][0] = (ChessPiece){PIECE_ROOK, COLOR_WHITE, false};
-    game->board[0][1] = (ChessPiece){PIECE_KNIGHT, COLOR_WHITE, false};
-    game->board[0][2] = (ChessPiece){PIECE_BISHOP, COLOR_WHITE, false};
-    game->board[0][3] = (ChessPiece){PIECE_QUEEN, COLOR_WHITE, false};
-    game->board[0][4] = (ChessPiece){PIECE_KING, COLOR_WHITE, false};
-    game->board[0][5] = (ChessPiece){PIECE_BISHOP, COLOR_WHITE, false};
-    game->board[0][6] = (ChessPiece){PIECE_KNIGHT, COLOR_WHITE, false};
-    game->board[0][7] = (ChessPiece){PIECE_ROOK, COLOR_WHITE, false};
+    game->board[0][0] = (ChessPiece){PIECE_ROOK, CHESS_COLOR_WHITE, false};
+    game->board[0][1] = (ChessPiece){PIECE_KNIGHT, CHESS_COLOR_WHITE, false};
+    game->board[0][2] = (ChessPiece){PIECE_BISHOP, CHESS_COLOR_WHITE, false};
+    game->board[0][3] = (ChessPiece){PIECE_QUEEN, CHESS_COLOR_WHITE, false};
+    game->board[0][4] = (ChessPiece){PIECE_KING, CHESS_COLOR_WHITE, false};
+    game->board[0][5] = (ChessPiece){PIECE_BISHOP, CHESS_COLOR_WHITE, false};
+    game->board[0][6] = (ChessPiece){PIECE_KNIGHT, CHESS_COLOR_WHITE, false};
+    game->board[0][7] = (ChessPiece){PIECE_ROOK, CHESS_COLOR_WHITE, false};
     for (int i = 0; i < 8; i++) {
-        game->board[1][i] = (ChessPiece){PIECE_PAWN, COLOR_WHITE, false};
+        game->board[1][i] = (ChessPiece){PIECE_PAWN, CHESS_COLOR_WHITE, false};
     }
 
-    game->board[7][0] = (ChessPiece){PIECE_ROOK, COLOR_BLACK, false};
-    game->board[7][1] = (ChessPiece){PIECE_KNIGHT, COLOR_BLACK, false};
-    game->board[7][2] = (ChessPiece){PIECE_BISHOP, COLOR_BLACK, false};
-    game->board[7][3] = (ChessPiece){PIECE_QUEEN, COLOR_BLACK, false};
-    game->board[7][4] = (ChessPiece){PIECE_KING, COLOR_BLACK, false};
-    game->board[7][5] = (ChessPiece){PIECE_BISHOP, COLOR_BLACK, false};
-    game->board[7][6] = (ChessPiece){PIECE_KNIGHT, COLOR_BLACK, false};
-    game->board[7][7] = (ChessPiece){PIECE_ROOK, COLOR_BLACK, false};
+    game->board[7][0] = (ChessPiece){PIECE_ROOK, CHESS_COLOR_BLACK, false};
+    game->board[7][1] = (ChessPiece){PIECE_KNIGHT, CHESS_COLOR_BLACK, false};
+    game->board[7][2] = (ChessPiece){PIECE_BISHOP, CHESS_COLOR_BLACK, false};
+    game->board[7][3] = (ChessPiece){PIECE_QUEEN, CHESS_COLOR_BLACK, false};
+    game->board[7][4] = (ChessPiece){PIECE_KING, CHESS_COLOR_BLACK, false};
+    game->board[7][5] = (ChessPiece){PIECE_BISHOP, CHESS_COLOR_BLACK, false};
+    game->board[7][6] = (ChessPiece){PIECE_KNIGHT, CHESS_COLOR_BLACK, false};
+    game->board[7][7] = (ChessPiece){PIECE_ROOK, CHESS_COLOR_BLACK, false};
     for (int i = 0; i < 8; i++) {
-        game->board[6][i] = (ChessPiece){PIECE_PAWN, COLOR_BLACK, false};
+        game->board[6][i] = (ChessPiece){PIECE_PAWN, CHESS_COLOR_BLACK, false};
     }
 }
 
@@ -36,7 +36,7 @@ void chess_game_init(ChessGame* game) {
 void chess_game_reset(ChessGame* game) {
     memset(game, 0, sizeof(ChessGame));
     init_board(game);
-    game->current_turn = COLOR_WHITE;
+    game->current_turn = CHESS_COLOR_WHITE;
     game->white_castle_kingside = true;
     game->white_castle_queenside = true;
     game->black_castle_kingside = true;
@@ -73,8 +73,8 @@ static bool is_valid_pawn_move(ChessGame* game, int from_x, int from_y, int to_x
     ChessPiece piece = game->board[from_x][from_y];
     ChessPiece target = game->board[to_x][to_y];
 
-    int direction = (piece.color == COLOR_WHITE) ? 1 : -1;
-    int start_row = (piece.color == COLOR_WHITE) ? 1 : 6;
+    int direction = (piece.color == CHESS_COLOR_WHITE) ? 1 : -1;
+    int start_row = (piece.color == CHESS_COLOR_WHITE) ? 1 : 6;
 
     if (from_y == to_y) {
         if (to_x == from_x + direction && target.type == PIECE_NONE) {
@@ -139,7 +139,7 @@ static bool is_valid_king_move(ChessGame* game, int from_x, int from_y, int to_x
 
     // Castling: king stays in same row, moves 2 columns
     if (from_x == to_x && abs(dy) == 2) {
-        if (piece.color == COLOR_WHITE && from_x == 0 && from_y == 4) {
+        if (piece.color == CHESS_COLOR_WHITE && from_x == 0 && from_y == 4) {
             // White castling
             if (to_y == 6 && game->white_castle_kingside) {
                 // Kingside
@@ -153,7 +153,7 @@ static bool is_valid_king_move(ChessGame* game, int from_x, int from_y, int to_x
                        game->board[0][3].type == PIECE_NONE;
             }
         }
-        if (piece.color == COLOR_BLACK && from_x == 7 && from_y == 4) {
+        if (piece.color == CHESS_COLOR_BLACK && from_x == 7 && from_y == 4) {
             // Black castling
             if (to_y == 6 && game->black_castle_kingside) {
                 // Kingside
@@ -193,11 +193,11 @@ bool chess_game_make_move(ChessGame* game, int from_x, int from_y, int to_x, int
 
     if (piece.type == PIECE_PAWN && to_x == game->en_passant_x && to_y == game->en_passant_y) {
         game->last_move.is_en_passant = true;
-        int capture_x = (piece.color == COLOR_WHITE) ? to_x - 1 : to_x + 1;
+        int capture_x = (piece.color == CHESS_COLOR_WHITE) ? to_x - 1 : to_x + 1;
         game->board[capture_x][to_y] = (ChessPiece){PIECE_NONE, 0, false};
     }
 
-    if (piece.type == PIECE_KING && abs(to_y - from_y) == 2) {
+        if (piece.type == PIECE_KING && abs(to_y - from_y) == 2) {
         if (to_y > from_y) {
             game->last_move.is_castle_kingside = true;
             game->board[to_x][5] = game->board[to_x][7];
@@ -220,14 +220,14 @@ bool chess_game_make_move(ChessGame* game, int from_x, int from_y, int to_x, int
         game->en_passant_y = to_y;
     }
 
-    if (piece.type == PIECE_PAWN && ((piece.color == COLOR_WHITE && to_x == 7) || (piece.color == COLOR_BLACK && to_x == 0))) {
+    if (piece.type == PIECE_PAWN && ((piece.color == CHESS_COLOR_WHITE && to_x == 7) || (piece.color == CHESS_COLOR_BLACK && to_x == 0))) {
         game->last_move.is_promotion = true;
         game->last_move.promotion_type = (promotion == PIECE_NONE) ? PIECE_QUEEN : promotion;
         game->board[to_x][to_y].type = game->last_move.promotion_type;
     }
 
     if (piece.type == PIECE_KING) {
-        if (piece.color == COLOR_WHITE) {
+        if (piece.color == CHESS_COLOR_WHITE) {
             game->white_castle_kingside = false;
             game->white_castle_queenside = false;
         } else {
@@ -236,7 +236,7 @@ bool chess_game_make_move(ChessGame* game, int from_x, int from_y, int to_x, int
         }
     }
     if (piece.type == PIECE_ROOK) {
-        if (piece.color == COLOR_WHITE) {
+        if (piece.color == CHESS_COLOR_WHITE) {
             if (from_x == 0 && from_y == 0) game->white_castle_queenside = false;
             if (from_x == 0 && from_y == 7) game->white_castle_kingside = false;
         } else {
@@ -250,11 +250,11 @@ bool chess_game_make_move(ChessGame* game, int from_x, int from_y, int to_x, int
     } else {
         game->halfmove_clock++;
     }
-    if (piece.color == COLOR_BLACK) {
+    if (piece.color == CHESS_COLOR_BLACK) {
         game->fullmove_number++;
     }
 
-    game->current_turn = (game->current_turn == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    game->current_turn = (game->current_turn == CHESS_COLOR_WHITE) ? CHESS_COLOR_BLACK : CHESS_COLOR_WHITE;
 
     // Check if the captured piece was the king (only possible if king was left in check)
     if (target.type == PIECE_KING) {
@@ -309,7 +309,7 @@ static bool is_square_attacked(ChessGame* game, int x, int y, ChessColor by_colo
             bool can_attack = false;
             switch (piece.type) {
                 case PIECE_PAWN: {
-                    int direction = (by_color == COLOR_WHITE) ? 1 : -1;
+                    int direction = (by_color == CHESS_COLOR_WHITE) ? 1 : -1;
                     if (from_x + direction == x && (from_y + 1 == y || from_y - 1 == y)) {
                         can_attack = true;
                     }
@@ -352,7 +352,7 @@ bool chess_game_is_in_check(ChessGame* game, ChessColor color) {
     if (!find_king(game, color, &king_x, &king_y)) {
         return false;
     }
-    ChessColor enemy_color = (color == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    ChessColor enemy_color = (color == CHESS_COLOR_WHITE) ? CHESS_COLOR_BLACK : CHESS_COLOR_WHITE;
     return is_square_attacked(game, king_x, king_y, enemy_color);
 }
 

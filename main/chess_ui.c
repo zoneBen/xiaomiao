@@ -205,7 +205,7 @@ void chess_ui_init(void)
     g_ui->white_elapsed_us = 0;
     g_ui->black_elapsed_us = 0;
     g_ui->turn_start_time = 0;
-    g_ui->current_turn_tracked = COLOR_WHITE;
+    g_ui->current_turn_tracked = CHESS_COLOR_WHITE;
 
     g_ui->bluetooth_initialized = false;
     g_ui->selected_device_index = -1;
@@ -334,7 +334,7 @@ void chess_ui_switch_screen(ChessScreen screen)
                 g_ui->black_material = 0;
                 g_ui->white_elapsed_us = 0;
                 g_ui->black_elapsed_us = 0;
-                g_ui->current_turn_tracked = COLOR_WHITE;
+                g_ui->current_turn_tracked = CHESS_COLOR_WHITE;
                 g_ui->turn_start_time = esp_timer_get_time();
             }
             break;
@@ -357,7 +357,7 @@ void chess_ui_apply_opponent_move_locked(int from_x, int from_y, int to_x, int t
 
     // Update timer for current player before switching turn
     int64_t now = esp_timer_get_time();
-    if (moving_color == COLOR_WHITE) {
+    if (moving_color == CHESS_COLOR_WHITE) {
         g_ui->white_elapsed_us += now - g_ui->turn_start_time;
     } else {
         g_ui->black_elapsed_us += now - g_ui->turn_start_time;
@@ -385,7 +385,7 @@ void chess_ui_apply_opponent_move_locked(int from_x, int from_y, int to_x, int t
             // Add material value to the capturer (moving_color captured the piece)
             int value = get_piece_value(captured.type);
             if (value > 0) {
-                if (moving_color == COLOR_WHITE) {
+                if (moving_color == CHESS_COLOR_WHITE) {
                     g_ui->white_material += value;
                 } else {
                     g_ui->black_material += value;
@@ -441,7 +441,7 @@ void chess_ui_update_game_locked(const ChessGame* game)
                 ChessPiece piece = g_game->board[y][x];
                 if (piece.type != PIECE_NONE) {
                     int value = get_piece_value(piece.type);
-                    if (piece.color == COLOR_WHITE) {
+                    if (piece.color == CHESS_COLOR_WHITE) {
                         g_ui->white_material += value;
                     } else {
                         g_ui->black_material += value;
@@ -756,7 +756,7 @@ void chess_ui_handle_key(KeyCode key)
 
                         // Update the timer for the current player before the move
                         int64_t now = esp_timer_get_time();
-                        if (moving_color == COLOR_WHITE) {
+                        if (moving_color == CHESS_COLOR_WHITE) {
                             g_ui->white_elapsed_us += now - g_ui->turn_start_time;
                         } else {
                             g_ui->black_elapsed_us += now - g_ui->turn_start_time;
@@ -777,7 +777,7 @@ void chess_ui_handle_key(KeyCode key)
                                 // Update material score based on piece value
                                 int value = get_piece_value(target_piece.type);
                                 if (value > 0) {
-                                    if (moving_color == COLOR_WHITE) {
+                                    if (moving_color == CHESS_COLOR_WHITE) {
                                         g_ui->white_material += value;
                                     } else {
                                         g_ui->black_material += value;
@@ -790,10 +790,10 @@ void chess_ui_handle_key(KeyCode key)
                             // Check for game over
                             if (chess_game_is_game_over(g_game)) {
                                 ChessColor winner = chess_game_get_winner(g_game);
-                                if (winner == COLOR_WHITE) {
+                                if (winner == CHESS_COLOR_WHITE) {
                                     chess_ui_show_message_internal("White captured king!", 3000);
                                     sound_play(SOUND_CHECKMATE);
-                                } else if (winner == COLOR_BLACK) {
+                                } else if (winner == CHESS_COLOR_BLACK) {
                                     chess_ui_show_message_internal("Black captured king!", 3000);
                                     sound_play(SOUND_CHECKMATE);
                                 }
@@ -1224,7 +1224,7 @@ static void render_game(void)
                 // Center the 14x14 piece in the 16x16 square
                 int piece_x = px + 1;
                 int piece_y = py + 1;
-                uint16_t piece_color = (piece.color == COLOR_WHITE) ? COLOR_WHITE_PIECE : COLOR_BLACK_PIECE;
+                uint16_t piece_color = (piece.color == CHESS_COLOR_WHITE) ? COLOR_WHITE_PIECE : COLOR_BLACK_PIECE;
 
                 // Draw the piece bitmap
                 for (int yy = 0; yy < PIECE_HEIGHT; yy++) {
@@ -1255,7 +1255,7 @@ static void render_game(void)
                     const uint8_t* bitmap = piece_images[piece.color][piece_idx];
                     int piece_x = px + 1;
                     int piece_y = py + 1;
-                    uint16_t piece_color = (piece.color == COLOR_WHITE) ? COLOR_WHITE_PIECE : COLOR_BLACK_PIECE;
+                    uint16_t piece_color = (piece.color == CHESS_COLOR_WHITE) ? COLOR_WHITE_PIECE : COLOR_BLACK_PIECE;
 
                     for (int yy = 0; yy < PIECE_HEIGHT; yy++) {
                         for (int xx = 0; xx < PIECE_WIDTH; xx++) {
@@ -1284,7 +1284,7 @@ static void render_game(void)
     // Turn indicator
     ChessColor turn = chess_game_get_current_turn(g_game);
     tft_sprite_fill_rect(&g_ui->sprite, sidebar_x, 0, 32, 20, COLOR_BACKGROUND);
-    tft_sprite_fill_rect(&g_ui->sprite, sidebar_x + 2, 2, 14, 14, (turn == COLOR_WHITE) ? TFT_WHITE : TFT_BLACK);
+    tft_sprite_fill_rect(&g_ui->sprite, sidebar_x + 2, 2, 14, 14, (turn == CHESS_COLOR_WHITE) ? TFT_WHITE : TFT_BLACK);
     tft_sprite_draw_rect(&g_ui->sprite, sidebar_x + 2, 2, 14, 14, TFT_LIGHTGREY);
 
     // Check indicator
@@ -1322,7 +1322,7 @@ static void render_game(void)
     int64_t black_total = g_ui->black_elapsed_us;
 
     // Add current turn time to respective player (prevent negative values)
-    if (turn == COLOR_WHITE) {
+    if (turn == CHESS_COLOR_WHITE) {
         int64_t elapsed = now - g_ui->turn_start_time;
         white_total += (elapsed > 0) ? elapsed : 0;
     } else {
@@ -1349,7 +1349,7 @@ static void render_game(void)
     text = white_timer_text;
     i = 0;
     while (text[i]) {
-        tft_sprite_draw_char(&g_ui->sprite, text_x, 38, text[i], turn == COLOR_WHITE ? TFT_YELLOW : TFT_LIGHTGREY, 1);
+        tft_sprite_draw_char(&g_ui->sprite, text_x, 38, text[i], turn == CHESS_COLOR_WHITE ? TFT_YELLOW : TFT_LIGHTGREY, 1);
         text_x += 6;
         i++;
     }
@@ -1386,7 +1386,7 @@ static void render_game(void)
     text = black_timer_text;
     i = 0;
     while (text[i]) {
-        tft_sprite_draw_char(&g_ui->sprite, text_x, 68, text[i], turn == COLOR_BLACK ? TFT_YELLOW : TFT_LIGHTGREY, 1);
+        tft_sprite_draw_char(&g_ui->sprite, text_x, 68, text[i], turn == CHESS_COLOR_BLACK ? TFT_YELLOW : TFT_LIGHTGREY, 1);
         text_x += 6;
         i++;
     }
@@ -1480,8 +1480,8 @@ static void render_game(void)
 
         // Game over text
         ChessColor winner = chess_game_get_winner(g_game);
-        const char* title_text = (winner == COLOR_WHITE) ? "White Captured King!" :
-                                 (winner == COLOR_BLACK) ? "Black Captured King!" : "";
+        const char* title_text = (winner == CHESS_COLOR_WHITE) ? "White Captured King!" :
+                                 (winner == CHESS_COLOR_BLACK) ? "Black Captured King!" : "";
         int title_x = (TFT_WIDTH - tft_sprite_text_width(title_text, 1)) / 2;
         text_x = title_x;
         text = title_text;
