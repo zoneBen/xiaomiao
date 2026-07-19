@@ -471,16 +471,21 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t* param) {
                 s_connected_callback();
             }
 
-            if (s_role == BT_GAME_ROLE_HOST && !is_reconnection) {
-                s_local_side = 0;
-                s_is_my_turn = true;
-                uint8_t msg[3];
-                msg[0] = 2;
-                msg[1] = BT_GAME_MSG_HELLO;
-                msg[2] = 1;
-                send_data(msg, 3);
-                if (s_invite_callback) {
-                    s_invite_callback();
+            if (!is_reconnection) {
+                if (s_role == BT_GAME_ROLE_HOST) {
+                    // 主机：等待从机发送 INVITE
+                    s_local_side = 0;
+                    s_is_my_turn = true;
+                    // 不自动发送任何消息，等待从机发起
+                } else {
+                    // 从机：发送 INVITE 给主机
+                    s_local_side = 1;
+                    s_is_my_turn = false;
+                    uint8_t msg[2];
+                    msg[0] = 1;  // 长度
+                    msg[1] = BT_GAME_MSG_INVITE;
+                    send_data(msg, 2);
+                    ESP_LOGI(BT_GAME_TAG, "Guest sent INVITE to host");
                 }
             }
             break;
@@ -861,6 +866,10 @@ bool bt_game_accept_connection(void) {
     s_local_side = 0;
     s_is_my_turn = true;
     set_state(BT_GAME_STATE_GAME_READY);
+    // 通知 UI 主机也进入游戏了
+    if (s_invite_accepted_callback) {
+        s_invite_accepted_callback(s_local_side);
+    }
     return true;
 }
 

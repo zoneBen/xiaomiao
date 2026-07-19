@@ -665,7 +665,25 @@ static void xiangqi_draw_piece(int x, int y, XiangqiPiece piece)
     int cy = XIANGQI_OFFSET_Y + y * XIANGQI_SQUARE_SIZE + XIANGQI_SQUARE_SIZE / 2;
 
     XiangqiColor color = xiangqi_get_piece_color(piece);
-    uint16_t text_color = (color == XIANGQI_COLOR_RED) ? COLOR_RED : COLOR_BLACK;
+
+    // 中国象棋传统配色：
+    // 红方：米黄色背景 + 白色文字
+    // 黑方：深绿色背景 + 白色文字
+    uint16_t bg_color, text_color;
+    if (color == XIANGQI_COLOR_RED) {
+        bg_color = RGB_TO_RGB565(0xF0, 0xE0, 0xC0);  // 米黄色
+        text_color = COLOR_WHITE;
+    } else {
+        bg_color = RGB_TO_RGB565(0x40, 0x80, 0x40);  // 深绿色
+        text_color = COLOR_WHITE;
+    }
+
+    // 绘制圆形背景（比棋子稍大）
+    int circle_radius = (XIANGQI_SQUARE_SIZE - 2) / 2;
+    tft_sprite_fill_circle(&g_sprite, cx, cy, circle_radius, bg_color);
+
+    // 绘制圆形边框
+    tft_sprite_draw_circle(&g_sprite, cx, cy, circle_radius, COLOR_BLACK);
 
     // 计算位图左上角位置，确保居中
     int bitmap_x = cx - XIANGQI_PIECE_WIDTH / 2;

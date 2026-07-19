@@ -119,6 +119,7 @@ void tft_sprite_draw_rect(TFT_Sprite* sprite, int16_t x, int16_t y, int16_t w, i
 void tft_sprite_draw_line(TFT_Sprite* sprite, int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color);
 void tft_sprite_draw_hline(TFT_Sprite* sprite, int16_t x, int16_t y, int16_t w, uint16_t color);
 void tft_sprite_draw_circle(TFT_Sprite* sprite, int16_t x0, int16_t y0, int16_t r, uint16_t color);
+void tft_sprite_fill_circle(TFT_Sprite* sprite, int16_t x0, int16_t y0, int16_t r, uint16_t color);
 void tft_sprite_draw_xbitmap(TFT_Sprite* sprite, int16_t x, int16_t y, const uint8_t* bitmap,
                              int16_t w, int16_t h, uint16_t color, uint16_t bg_color);
 void tft_sprite_draw_char(TFT_Sprite* sprite, int16_t x, int16_t y, char c, uint16_t color, uint8_t size);

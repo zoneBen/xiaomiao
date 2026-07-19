@@ -425,6 +425,37 @@ void tft_sprite_draw_circle(TFT_Sprite* sprite, int16_t x0, int16_t y0, int16_t 
     }
 }
 
+void tft_sprite_fill_circle(TFT_Sprite* sprite, int16_t x0, int16_t y0, int16_t r, uint16_t color)
+{
+    if (!sprite || !sprite->created) return;
+
+    int16_t f = 1 - r;
+    int16_t ddF_x = 1;
+    int16_t ddF_y = -2 * r;
+    int16_t x = 0;
+    int16_t y = r;
+
+    // 绘制水平线
+    tft_sprite_draw_hline(sprite, x0 - r, y0, 2 * r + 1, color);
+
+    while (x < y) {
+        if (f >= 0) {
+            y--;
+            ddF_y += 2;
+            f += ddF_y;
+        }
+        x++;
+        ddF_x += 2;
+        f += ddF_x;
+
+        // 绘制上下对称的水平线
+        tft_sprite_draw_hline(sprite, x0 - x, y0 + y, 2 * x + 1, color);
+        tft_sprite_draw_hline(sprite, x0 - x, y0 - y, 2 * x + 1, color);
+        tft_sprite_draw_hline(sprite, x0 - y, y0 + x, 2 * y + 1, color);
+        tft_sprite_draw_hline(sprite, x0 - y, y0 - x, 2 * y + 1, color);
+    }
+}
+
 void tft_sprite_draw_rect(TFT_Sprite* sprite, int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
 {
     if (!sprite || !sprite->created) return;
