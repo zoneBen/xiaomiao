@@ -14,5 +14,8 @@ Makefile
 *.swo
 *~
 .DS_Store
+__pycache__/
+*.pyc
+test/*.exe
 chess_merged.bin
 国际象棋中国象棋蓝牙对战版.bin
