@@ -43,7 +43,7 @@ typedef struct {
     TickType_t chord_start;
 
     bool light_on;
-    bool buzzer_on;
+    uint8_t gear;
 
     int selected;
     int scroll_top;
@@ -150,6 +150,7 @@ static void ui_connect_selected(void)
         return;
     }
 
+    boat_link_stop_now();
     boat_link_connect(s_ui.aps[s_ui.selected].ssid);
     s_ui.screen = BOAT_SCREEN_CONNECTING;
     s_ui.connect_from_user = true;
@@ -190,7 +191,7 @@ static void ui_handle_control_keys(void)
         if (s_ui.suppress_release[KEY_B]) {
             s_ui.suppress_release[KEY_B] = false;
         } else if (!s_ui.chord_pending) {
-            s_ui.buzzer_on = !s_ui.buzzer_on;
+            s_ui.gear = boat_gear_next(s_ui.gear);
             sound_play(SOUND_MENU_SELECT);
         }
     }
@@ -375,7 +376,8 @@ static void ui_apply_command(void)
     }
 
     boat_link_set_command(left, right, brake);
-    boat_link_set_outputs(s_ui.light_on, s_ui.buzzer_on);
+    boat_link_set_outputs(s_ui.light_on);
+    boat_link_set_gear(s_ui.gear);
 
     s_ui.left_on = (left > 0);
     s_ui.right_on = (right > 0);
@@ -388,7 +390,7 @@ static void ui_render(void)
     view.link_state = s_ui.link_state;
     view.scan_state = s_ui.scan_state;
     view.light_on = s_ui.light_on;
-    view.buzzer_on = s_ui.buzzer_on;
+    view.gear = s_ui.gear;
     view.left_on = s_ui.left_on;
     view.right_on = s_ui.right_on;
     view.brake = s_ui.brake;
@@ -439,6 +441,7 @@ void boat_ui_init(void)
 {
     memset(&s_ui, 0, sizeof(s_ui));
     s_ui.screen = BOAT_SCREEN_CONTROL;
+    s_ui.gear = BOAT_GEAR_MIN;
     s_ui.scan_state = SCAN_IDLE;
     s_ui.prev_scan_state = SCAN_IDLE;
 

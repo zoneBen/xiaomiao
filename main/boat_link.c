@@ -438,6 +438,7 @@ bool boat_link_init(void)
 {
     memset(&s_ctx, 0, sizeof(s_ctx));
     boat_udp_init(&s_ctx.udp);
+    s_ctx.flags = boat_flags_set_gear(0, BOAT_GEAR_MIN);
     s_ctx.lock = xSemaphoreCreateMutex();
     if (s_ctx.lock == NULL) {
         ESP_LOGE(TAG, "Cannot create mutex");
@@ -729,7 +730,7 @@ void boat_link_set_command(uint8_t left, uint8_t right, bool brake)
     link_unlock();
 }
 
-void boat_link_set_outputs(bool light, bool buzzer)
+void boat_link_set_outputs(bool light)
 {
     if (s_ctx.lock == NULL) {
         return;
@@ -741,11 +742,23 @@ void boat_link_set_outputs(bool light, bool buzzer)
     } else {
         s_ctx.flags &= (uint8_t)~BOAT_FLAG_LIGHT;
     }
-    if (buzzer) {
-        s_ctx.flags |= BOAT_FLAG_BUZZER;
-    } else {
-        s_ctx.flags &= (uint8_t)~BOAT_FLAG_BUZZER;
+    link_unlock();
+}
+
+void boat_link_set_gear(uint8_t gear)
+{
+    if (s_ctx.lock == NULL) {
+        return;
     }
+
+    if (gear < BOAT_GEAR_MIN) {
+        gear = BOAT_GEAR_MIN;
+    } else if (gear > BOAT_GEAR_MAX) {
+        gear = BOAT_GEAR_MAX;
+    }
+
+    link_lock();
+    s_ctx.flags = boat_flags_set_gear(s_ctx.flags, gear);
     link_unlock();
 }
 

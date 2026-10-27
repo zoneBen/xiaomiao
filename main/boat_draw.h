@@ -16,7 +16,7 @@ typedef struct {
     BoatScanState scan_state;
 
     bool light_on;
-    bool buzzer_on;
+    uint8_t gear;
     bool left_on;
     bool right_on;
     bool brake;

@@ -17,8 +17,6 @@
 #define C_LAMP_ON    RGB_TO_RGB565(255, 220, 40)
 #define C_LAMP_DIM   RGB_TO_RGB565(130, 105, 20)
 #define C_LAMP_OFF   RGB_TO_RGB565(95, 95, 75)
-#define C_BUZZER_ON  RGB_TO_RGB565(80, 220, 255)
-#define C_BUZZER_OFF RGB_TO_RGB565(90, 100, 110)
 
 #define BOAT_CX 80
 
@@ -183,26 +181,6 @@ static void draw_lamp(TFT_Sprite* sprite, bool on)
     }
 }
 
-static void draw_buzzer(TFT_Sprite* sprite, bool on, uint32_t tick)
-{
-    uint16_t color = on ? C_BUZZER_ON : C_BUZZER_OFF;
-
-    tft_sprite_fill_rect(sprite, 73, 41, 6, 6, color);
-    tft_sprite_draw_line(sprite, 79, 41, 84, 44, color);
-    tft_sprite_draw_line(sprite, 79, 46, 84, 44, color);
-    tft_sprite_fill_rect(sprite, 84, 43, 2, 2, color);
-
-    if (on) {
-        int phase = (int)((tick / 4) % 2);
-        for (int i = 0; i < 3; i++) {
-            int x = 87 + i * 3;
-            int span = 2 + i + phase;
-            tft_sprite_draw_line(sprite, (int16_t)x, (int16_t)(44 - span),
-                                 (int16_t)x, (int16_t)(44 + span), color);
-        }
-    }
-}
-
 static const int8_t s_prop_dirs[12][2] = {
     {5, 0}, {4, 3}, {3, 4}, {0, 5}, {-3, 4}, {-4, 3},
     {-5, 0}, {-4, -3}, {-3, -4}, {0, -5}, {3, -4}, {4, -3},
@@ -252,12 +230,25 @@ static void draw_boat(TFT_Sprite* sprite, const boat_view_t* view)
     draw_hull(sprite);
     draw_cabin(sprite);
     draw_lamp(sprite, view->light_on);
-    draw_buzzer(sprite, view->buzzer_on, view->tick);
     draw_thruster(sprite, 68, 84, view->left_on, view->tick);
     draw_thruster(sprite, 92, 84, view->right_on, view->tick);
     if (view->brake) {
         draw_brake(sprite);
     }
+}
+
+static uint16_t gear_color(uint8_t gear)
+{
+    if (gear <= 2) {
+        return TFT_GREEN;
+    }
+    if (gear == 3) {
+        return TFT_YELLOW;
+    }
+    if (gear == 4) {
+        return TFT_ORANGE;
+    }
+    return TFT_RED;
 }
 
 static void draw_bottom_bar(TFT_Sprite* sprite, const boat_view_t* view)
@@ -266,9 +257,11 @@ static void draw_bottom_bar(TFT_Sprite* sprite, const boat_view_t* view)
     tft_sprite_draw_hline(sprite, 0, 94, TFT_WIDTH, C_HULL_EDGE);
 
     const char* light = view->light_on ? STR_LIGHT_ON : STR_LIGHT_OFF;
-    const char* buzzer = view->buzzer_on ? STR_BUZZER_ON : STR_BUZZER_OFF;
+    char gear_text[24];
+    snprintf(gear_text, sizeof(gear_text), STR_GEAR_FMT, (int)view->gear);
+
     draw_text(sprite, 4, 94, light, view->light_on ? TFT_YELLOW : TFT_LIGHTGREY, 2);
-    draw_text(sprite, 84, 94, buzzer, view->buzzer_on ? TFT_CYAN : TFT_LIGHTGREY, 2);
+    draw_text(sprite, 76, 94, gear_text, gear_color(view->gear), 2);
 
     uint16_t hint_color = (view->link_state == LINK_CONNECTED) ? TFT_DARKGREY : TFT_RED;
     draw_center(sprite, 110, STR_HOLD_SCAN, hint_color, 2);

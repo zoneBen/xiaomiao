@@ -53,7 +53,8 @@ BoatFailReason boat_link_get_fail_reason(void);
 
 /* Command state, consumed by the 20 Hz sender. */
 void boat_link_set_command(uint8_t left, uint8_t right, bool brake);
-void boat_link_set_outputs(bool light, bool buzzer);
+void boat_link_set_outputs(bool light);
+void boat_link_set_gear(uint8_t gear);
 void boat_link_stop_now(void);
 
 #ifdef __cplusplus

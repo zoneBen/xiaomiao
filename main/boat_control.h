@@ -10,6 +10,15 @@
 extern "C" {
 #endif
 
+/* Cycle 1 -> 2 -> 3 -> 4 -> 5 -> 1. */
+static inline uint8_t boat_gear_next(uint8_t gear)
+{
+    if (gear < BOAT_GEAR_MIN || gear >= BOAT_GEAR_MAX) {
+        return BOAT_GEAR_MIN;
+    }
+    return (uint8_t)(gear + 1);
+}
+
 /* Map held direction keys to thruster outputs.
  *
  * Priority: BACK > LEFT+RIGHT > LEFT > RIGHT > FORWARD > idle.

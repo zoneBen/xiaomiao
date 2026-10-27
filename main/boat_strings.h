@@ -21,8 +21,7 @@
 
 #define STR_LIGHT_ON           "A 灯开"
 #define STR_LIGHT_OFF          "A 灯关"
-#define STR_BUZZER_ON          "B 喇叭开"
-#define STR_BUZZER_OFF         "B 喇叭关"
+#define STR_GEAR_FMT           "B 档位 %d"
 #define STR_HOLD_SCAN          "按住 A+B 搜索"
 #define STR_BRAKE              "刹车"
 

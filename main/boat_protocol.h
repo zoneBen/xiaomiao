@@ -23,9 +23,13 @@ extern "C" {
 
 #define BOAT_THROTTLE_MAX   100
 
-#define BOAT_FLAG_LIGHT     0x01
-#define BOAT_FLAG_BUZZER    0x02
-#define BOAT_FLAG_BRAKE     0x04
+#define BOAT_FLAG_LIGHT      0x01
+/* bit1 is retired: the boat has no buzzer. Remotes must leave it 0. */
+#define BOAT_FLAG_BRAKE      0x04
+#define BOAT_FLAG_GEAR_SHIFT 3
+#define BOAT_FLAG_GEAR_MASK  (0x07 << BOAT_FLAG_GEAR_SHIFT)
+#define BOAT_GEAR_MIN        1
+#define BOAT_GEAR_MAX        5
 
 /* 8-byte command packet, sent at 20 Hz. All fields are single bytes, so the
  * layout is independent of host endianness. */
@@ -36,7 +40,7 @@ typedef struct __attribute__((packed)) {
     uint8_t seq;
     uint8_t left;   /* left thruster, 0..100 */
     uint8_t right;  /* right thruster, 0..100 */
-    uint8_t flags;  /* BOAT_FLAG_* */
+    uint8_t flags;  /* light, brake, gear (bits 3..5) */
     uint8_t checksum;
 } boat_packet_t;
 
@@ -52,6 +56,17 @@ static inline uint8_t boat_packet_checksum(const boat_packet_t* packet)
 static inline void boat_packet_finalize(boat_packet_t* packet)
 {
     packet->checksum = boat_packet_checksum(packet);
+}
+
+static inline uint8_t boat_flags_set_gear(uint8_t flags, uint8_t gear)
+{
+    return (uint8_t)((flags & (uint8_t)~BOAT_FLAG_GEAR_MASK) |
+                     ((gear & 0x07) << BOAT_FLAG_GEAR_SHIFT));
+}
+
+static inline uint8_t boat_flags_get_gear(uint8_t flags)
+{
+    return (uint8_t)((flags & BOAT_FLAG_GEAR_MASK) >> BOAT_FLAG_GEAR_SHIFT);
 }
 
 #ifdef __cplusplus

@@ -42,8 +42,52 @@ static void test_thruster_mapping(void)
     expect_command(true, true, true, true, 0, 0, true);            /* back wins */
 }
 
+static void test_gear(void)
+{
+    assert(boat_gear_next(0) == 1);
+    assert(boat_gear_next(1) == 2);
+    assert(boat_gear_next(2) == 3);
+    assert(boat_gear_next(3) == 4);
+    assert(boat_gear_next(4) == 5);
+    assert(boat_gear_next(5) == 1);
+
+    assert(boat_flags_set_gear(0, 3) == 0x18);
+    assert(boat_flags_set_gear(BOAT_FLAG_LIGHT, 5) == 0x29);
+    assert(boat_flags_set_gear(BOAT_FLAG_BRAKE, 1) == 0x0C);
+    assert(boat_flags_get_gear(0x18) == 3);
+    assert(boat_flags_get_gear(0x29) == 5);
+    assert(boat_flags_get_gear(0x0C) == 1);
+
+    uint8_t flags = boat_flags_set_gear(BOAT_FLAG_LIGHT | BOAT_FLAG_BRAKE, 5);
+    assert((flags & 0x02) == 0); /* bit1 is reserved and must stay 0 */
+}
+
+static uint8_t packet_checksum(uint8_t left, uint8_t right, uint8_t flags)
+{
+    boat_packet_t packet = {
+        .magic0 = BOAT_PACKET_MAGIC0,
+        .magic1 = BOAT_PACKET_MAGIC1,
+        .version = BOAT_PROTO_VERSION,
+        .seq = 0,
+        .left = left,
+        .right = right,
+        .flags = flags,
+        .checksum = 0,
+    };
+
+    _Static_assert(sizeof(boat_packet_t) == 8, "packet must stay 8 bytes");
+    boat_packet_finalize(&packet);
+    return packet.checksum;
+}
+
 static void test_protocol_packet(void)
 {
+    /* Examples from the boat-side protocol document. */
+    assert(packet_checksum(100, 100, 0x18) == 0x02); /* gear 3 forward */
+    assert(packet_checksum(100, 100, 0x29) == 0x33); /* gear 5 + light */
+    assert(packet_checksum(0, 0, 0x0C) == 0x16);     /* gear 1 + brake */
+    assert(packet_checksum(100, 100, 0x00) == 0x1A); /* legacy remote */
+
     boat_packet_t packet = {
         .magic0 = BOAT_PACKET_MAGIC0,
         .magic1 = BOAT_PACKET_MAGIC1,
@@ -55,8 +99,6 @@ static void test_protocol_packet(void)
         .checksum = 0,
     };
 
-    _Static_assert(sizeof(boat_packet_t) == 8, "packet must stay 8 bytes");
-
     boat_packet_finalize(&packet);
     assert(packet.checksum ==
            (uint8_t)(packet.magic0 ^ packet.magic1 ^ packet.version ^
@@ -66,6 +108,7 @@ static void test_protocol_packet(void)
 int main(void)
 {
     test_thruster_mapping();
+    test_gear();
     test_protocol_packet();
     printf("boat logic tests: PASS\n");
     return 0;
